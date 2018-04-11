@@ -304,6 +304,7 @@ for(i in 1:length(ST)){
 }
 
 ## Save combined data for each ticker to RDS file
+setwd('C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentStockPredictions_Expanded/Analysis')
 for(i in 1:length(listCombo)){
     saveRDS(combineSent(listCombo[[i]][1], listCombo[[i]][2], listCombo[[i]][3]), paste0('Data/TickerRDS/', strsplit(ST[i], "\\.")[[1]][1],'.RDS'))
 }
