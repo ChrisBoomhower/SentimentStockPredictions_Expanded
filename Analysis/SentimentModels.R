@@ -73,213 +73,203 @@ addVolatility <- function(df.x, minuteData){
 AAPL.response <- addVolatility(AAPL.hour, AAPL.minute)
 XOM.response <- addVolatility(XOM.hour, XOM.minute)
 
-plotResponses <- function(df){
+## View basic plots of stock measures
+plotResponses <- function(df, tick){
     par(mfrow=c(3,2))
-    plot(df$close, type = 'l')
-    plot(df$close.diff, type = 'l')
-    plot(df$return.percent, type = 'l')
-    plot(df$volatility, type = 'l')
-    plot(df$volatility.diff, type = 'l')
+    plot(df$close, type = 'l', main = paste(tick, "Hourly Close Price"))
+    plot(df$close.diff, type = 'l', main = paste(tick, "Hourly Close Price (Differenced)"))
+    plot(df$return.percent, type = 'l', main = paste(tick, "Hourly Return (%)"))
+    plot(df$volatility, type = 'l', main = paste(tick, "Hourly Volatility"))
+    plot(df$volatility.diff, type = 'l', main = paste(tick, "Hourly Volatility (Differenced)"))
     par(mfrow=c(1,1))
 }
 
-plotResponses(AAPL.response)
-plotResponses(XOM.response)
+plotResponses(AAPL.response, "AAPL")
+plotResponses(XOM.response, "XOM")
+
+########################################
+###### Merge Sentiment and Stocks ######
+########################################
+
+## Merge sentiment data with stock data for model development
+mergeSentiment <- function(df, tick){
+    tickSent <- readRDS(paste0('Data/TickerRDS/', tick, '.RDS'))
+    
+    ## Start with training data
+    tickSent.train <- merge(tickSent, df[, c("date",
+                                             "hour",
+                                             "close",
+                                             "close.diff",
+                                             "return.percent",
+                                             "volatility",
+                                             "volatility.diff")],
+                            by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.train <- tickSent.train[tickSent.train$date > "2018-02-26" & tickSent.train$date <= "2018-03-30",] #Incomplete sentiment data before 2-26-18
+    tickSent.train[is.na(tickSent.train)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.train) <- gsub(x = colnames(tickSent.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    
+    ## Create prediction dataset next
+    tickSent.pred <- merge(tickSent, df[, c("date",
+                                            "hour",
+                                            "close",
+                                            "close.diff",
+                                            "return.percent",
+                                            "volatility",
+                                            "volatility.diff")],
+                           by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.pred <- tickSent.pred[tickSent.pred$date > "2018-03-30" & tickSent.pred$date <= "2018-04-09",] #20% of data set aside for predictions
+    tickSent.pred[is.na(tickSent.pred)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.pred) <- gsub(x = colnames(tickSent.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
 
     
-#     ## Merge sentiment data with stock data for model development
-#     tickSent <- readRDS(paste0('Data/TickerRDS/', tick, '.RDS'))
-#     tickSent.train <- merge(tickSent, stock[, c("date", "hour", "close")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-#     tickSent.train <- tickSent.train[tickSent.train$date > "2018-02-26" & tickSent.train$date <= "2018-03-14",] #Incomplete sentiment data before 2-26-18
-#     tickSent.train[is.na(tickSent.train)] <- 0 #Fill any NA sentiment scores with 0
-#     colnames(tickSent.train) <- gsub(x = colnames(tickSent.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-#     
-#     cat("\nTrain Head\n")
-#     print(head(tickSent.train[,c(1,2,3,201)],21))
-#     cat("\nTrain Tail\n")
-#     print(tail(tickSent.train[,c(1,2,3,201)],21))
-#     
-#     cat("\nglimpse Train\n")
-#     print(glimpse(tickSent.train))
-#     
-#     #############################################
-#     ###### Set Aside Data for Prediction ########
-#     #############################################
-#     
-#     ## Merge sentiment data with stock data for model prediction
-#     tickSent.pred <- merge(tickSent, stock[, c("date", "hour", "high")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-#     tickSent.pred <- tickSent.pred[tickSent.pred$date > "2018-03-14",] #20% of data set aside for predictions
-#     tickSent.pred[is.na(tickSent.pred)] <- 0 #Fill any NA sentiment scores with 0
-#     colnames(tickSent.pred) <- gsub(x = colnames(tickSent.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-#     
-#     cat("\nTest Head\n")
-#     print(head(tickSent.pred[,c(1,2,3,201)],21))
-#     cat("\nTest Tail\n")
-#     print(tail(tickSent.pred[,c(1,2,3,201)],21))
-#     
-#     print(cat("\nglimpse Test\n"))
-#     glimpse(tickSent.pred)
-#     
-#     ##########################################
-#     ###### Check for Data Stationarity #######
-#     ##########################################
-#     pdf(paste0('Stationarity_', tick, '.pdf'))
-#     ## Check stationarity of variables in model
-#     temp <- apply(rbind(tickSent.train[2:length(tickSent.train)],tickSent.pred[2:length(tickSent.pred)]), 2, adf.test, alternative = "stationary", k=0)
-#     plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Dickey-Fuller p.value", main = "Dickey-Fuller p.values") #Note that while sentiment values are stationary, stock price is not
-#     
-#     temp <- apply(rbind(tickSent.train[2:length(tickSent.train)],tickSent.pred[2:length(tickSent.pred)]), 2, adf.test, alternative = "stationary")
-#     plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Augmented Dickey-Fuller p.value", main = "Augmented Dickey-Fuller p.values") #Note that while sentiment values are stationary, stock price is not
-#     
-#     ## Create high.diff training set
-#     tickSent.diff.train <- merge(tickSent, stock[, c("date", "hour", "high.diff")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-#     tickSent.diff.train <- tickSent.diff.train[tickSent.diff.train$date > "2018-02-26" & tickSent.diff.train$date <= "2018-03-14",] #Incomplete sentiment data before 2-23-18
-#     tickSent.diff.train[is.na(tickSent.diff.train)] <- 0 #Fill any NA sentiment scores with 0
-#     colnames(tickSent.diff.train) <- gsub(x = colnames(tickSent.diff.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-#     colnames(tickSent.diff.train)[which(colnames(tickSent.diff.train) %in% "high.diff")] <- "high"
-#     
-#     cat("\nSanity check for matching Train df size\n")
-#     print(nrow(tickSent.train) == nrow(tickSent.diff.train)) #Sanity check on size
-#     
-#     ## Create high.diff test set
-#     tickSent.diff.pred <- merge(tickSent, stock[, c("date", "hour", "high.diff")], by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-#     tickSent.diff.pred <- tickSent.diff.pred[tickSent.diff.pred$date > "2018-03-14",] #20% of data set aside for predictions
-#     tickSent.diff.pred[is.na(tickSent.diff.pred)] <- 0 #Fill any NA sentiment scores with 0
-#     colnames(tickSent.diff.pred) <- gsub(x = colnames(tickSent.diff.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-#     colnames(tickSent.diff.pred)[which(colnames(tickSent.diff.pred) %in% "high.diff")] <- "high"
-#     
-#     cat("\nSanity check for matching Test df size\n")
-#     print(nrow(tickSent.pred) == nrow(tickSent.diff.pred)) #Sanity check on size
-#     
-#     #sum(!(cumsum(c(AAPL.stock$high[1], diff(AAPL.stock$high))) == AAPL.stock$high)) #Checking to see how to compare models when using differenced price
-#     
-#     on.exit(dev.off())
-#     on.exit(sink(), add = TRUE) #Stop writing to text file for later review
-#     
-#     return(list(tickSent.train, tickSent.pred, tickSent.diff.train, tickSent.diff.pred))
-# }
-# 
-# AAPL <- getTrainTest("AAPL")
-# AMZN <- getTrainTest("AMZN")
-# BA   <- getTrainTest("BA")
-# DWDP <- getTrainTest("DWDP")
-# JNJ  <- getTrainTest("JNJ")
-# JPM  <- getTrainTest("JPM")
-# NEE  <- getTrainTest("NEE")
-# PG   <- getTrainTest("PG")
-# SPG  <- getTrainTest("SPG")
-# VZ   <- getTrainTest("VZ")
-# XOM  <- getTrainTest("XOM")
-# 
-# ###########################################
-# ###### Generate Random Forest Model #######
-# ###########################################
-# doRF <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
-#     tryCatch({
-#         ## Write outputs to external files for later review
-#         sink(paste0("doRF_", tick, xform, "_", metric, ".txt"))
-#         pdf(paste0('RFplots_',tick, xform, '_', metric, '.pdf'))
-#         
-#         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
-#         ## Setup data
-#         cols <- colnames(train.df)
-#         cols <- cols[!cols %in% "date"]
-#         
-#         ## Create Random Forest Seeds
-#         # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
-#         set.seed(123)
-#         seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
-#         for(i in 1:43) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
-#         seeds[[44]] <- sample.int(1000, 1)
-#         
-#         ## Setup training parameters
-#         ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #35 day cv training, 14 day cv testing
-#         tuneGridRF <- expand.grid(.mtry=c(1:72))
-#         #metric <- "Rsquared"
-#         
-#         ## Perform training
-#         start <- Sys.time() #Start timer
-#         rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE)
-#         print(Sys.time() - start)
-#         #tuneGridRF <- expand.grid(.mtry=22)
-#         #rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE) #AAPL best mtry = 22
-#         cat("\nRF Output\n")
-#         print(rf)
-#         print(plot(rf))
-#         
-#         ## Evaluate metrics
-#         r2.train <- rSquared(train.df$high, train.df$high - predict(rf, train.df[,cols]))
-#         r2.pred <- rSquared(pred.df$high, pred.df$high - predict(rf, pred.df[,cols]))
-#         mse.train <- mean((train.df$high - predict(rf, train.df[,cols]))^2)
-#         mse.pred <- mean((pred.df$high - predict(rf, pred.df[,cols]))^2)
-#         rmse.train <- sqrt(mse.train)
-#         rmse.pred <- sqrt(mse.pred)
-#         mae.train <- mean(abs(train.df$high - predict(rf, train.df[,cols])))
-#         mae.pred <- mean(abs(pred.df$high - predict(rf, pred.df[,cols])))
-#         mape.train <- MAPE(train.df$high, predict(rf, train.df[,cols]))
-#         mape.pred <- MAPE(pred.df$high, predict(rf, pred.df[,cols]))
-#         
-#         ## Plot Rsquared Evaluation
-#         p <- ggplot(aes(x=actual, y=pred),
-#                     data=data.frame(actual=train.df$high, pred=predict(rf, train.df[,cols])))
-#         print(p + geom_point() +
-#             geom_abline(color="red") +
-#             ggtitle(paste(tick, "RandomForest Regression: Training r^2 =", r2.train)))
-#         
-#         p <- ggplot(aes(x=actual, y=pred),
-#                     data=data.frame(actual=pred.df$high, pred=predict(rf, pred.df[,cols])))
-#         print(p + geom_point() +
-#             geom_abline(color="red") +
-#             ggtitle(paste(tick, "RandomForest Regression: Prediction r^2 =", r2.pred)))
-#         
-#         if(xform == "diff"){
-#             ## Plot trained and predicted performance
-#             plot(as.numeric(c(cumsum(c(orig.train.df$high[1], train.df$high)), cumsum(c(orig.pred.df$high[1], pred.df$high)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "RF Performance (Diff): Training + Prediction"))
-#             axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
-#             text(1:(sum(length(train.df$high), length(pred.df$high))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-#             lines(c(cumsum(c(orig.train.df$high[1], predict(rf, train.df[,cols]))), cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
-#             abline(v = length(train.df$high)+1, lty = 2, col = "blue")
-#             
-#             ## Plot just predicted performance
-#             plot(as.numeric(cumsum(c(orig.pred.df$high[1], pred.df$high))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df$high[1], pred.df$high)))), max(c(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df$high[1], pred.df$high))))), main = paste(tick, "RF Performance (Diff): Prediction"))
-#             axis(1, at=1:(length(pred.df$high)), labels=FALSE)
-#             text(1:(length(pred.df$high)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-#             lines(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
-#         }
-#         else{
-#             ## Plot trained and predicted performance
-#             plot(as.numeric(c(train.df$high, pred.df$high)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "RF Performance: Training + Prediction"))
-#             axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
-#             text(1:(sum(length(train.df$high), length(pred.df$high))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-#             lines(c(predict(rf, train.df[,cols]),predict(rf, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
-#             abline(v = length(train.df$high)+1, lty = 2, col = "blue")
-#             
-#             ## Plot just predicted performance
-#             plot(as.numeric(pred.df$high), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(rf, pred.df[,cols]), pred.df$high)), max(c(predict(rf, pred.df[,cols]), pred.df$high))), main = paste(tick, "RF Performance: Prediction"))
-#             axis(1, at=1:(length(pred.df$high)), labels=FALSE)
-#             text(1:(length(pred.df$high)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-#             lines(predict(rf, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
-#         }
-#         
-#         ## Get feature importance
-#         feat.imp <- varImp(rf)
-#         plot(feat.imp, main = paste(tick, "RF Feature Importance"))
-#         
-#         on.exit(dev.off())
-#         on.exit(sink(), add = TRUE)
-#     }, error = function(e){
-#         on.exit(dev.off())
-#         on.exit(sink(), add = TRUE)
-#         print(paste(tick, "RF failed"))
-#     })
-#     
-#     
-#     return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
-# }
-# 
-# startOverall <- Sys.time() #Start Overall timer
-# 
-# AAPL.rf.Rsquared <- doRF(AAPL[[1]], AAPL[[2]], "AAPL", "Rsquared")
+    return(list(tickSent.train, tickSent.pred))
+}
+
+AAPL <- mergeSentiment(AAPL.response, "AAPL")
+XOM <- mergeSentiment(XOM.response, "XOM")
+
+
+##########################################
+###### Check for Data Stationarity #######
+##########################################
+
+## Perform Dickey-Fuller and Augmented Dickey-Fuller tests
+doDickey <- function(tickSent.train, tickSent.pred, tick){
+    par(mfrow=c(2,1))
+    #pdf(paste0('Stationarity_', tick, '.pdf'))
+    temp <- apply(rbind(tickSent.train[2:length(tickSent.train)],tickSent.pred[2:length(tickSent.pred)]), 2, adf.test, alternative = "stationary", k=0)
+    plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Dickey-Fuller p.value", main = paste(tick, "Dickey-Fuller p.values"))
+
+    temp <- apply(rbind(tickSent.train[2:length(tickSent.train)],tickSent.pred[2:length(tickSent.pred)]), 2, adf.test, alternative = "stationary")
+    plot(sapply(temp, function(x) x$p.value), xlab = "Column Location", ylab = "Augmented Dickey-Fuller p.value", main = paste(tick, "Augmented Dickey-Fuller p.values"))
+}
+
+doDickey(AAPL[[1]], AAPL[[2]], "AAPL")
+doDickey(XOM[[1]], XOM[[2]], "XOM")
+
+###########################################
+###### Generate Random Forest Model #######
+###########################################
+doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
+    tryCatch({
+        ## Write outputs to external files for later review
+        par(mfrow=c(1,1))
+        sink(paste0("doRF_", tick, response, xform, "_", metric, ".txt"))
+        pdf(paste0('RFplots_',tick, response, xform, '_', metric, '.pdf'))
+
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
+
+        ## Create Random Forest Seeds
+        # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 23) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:22) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[23]] <- sample.int(1000, 1)
+
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 105, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
+        tuneGridRF <- expand.grid(.mtry=c(1:72))
+        #metric <- "Rsquared"
+
+        ## Perform training
+        start <- Sys.time() #Start timer
+        rf <- train(formula, data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE)
+        print(Sys.time() - start)
+        #tuneGridRF <- expand.grid(.mtry=22)
+        #rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE) #AAPL best mtry = 22
+        cat("\nRF Output\n")
+        print(rf)
+        print(plot(rf))
+
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df[,response], train.df[,response] - predict(rf, train.df[,cols]))
+        r2.pred <- rSquared(pred.df[,response], pred.df[,response] - predict(rf, pred.df[,cols]))
+        mse.train <- mean((train.df[,response] - predict(rf, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df[,response] - predict(rf, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df[,response] - predict(rf, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df[,response] - predict(rf, pred.df[,cols])))
+        mape.train <- MAPE(train.df[,response], predict(rf, train.df[,cols]))
+        mape.pred <- MAPE(pred.df[,response], predict(rf, pred.df[,cols]))
+
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=train.df[,response], pred=predict(rf, train.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "RandomForest Regression: Training r^2 =", r2.train)))
+
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df[,response], pred=predict(rf, pred.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "RandomForest Regression: Prediction r^2 =", r2.pred)))
+
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df[,response][1], train.df[,response])), cumsum(c(orig.pred.df[,response][1], pred.df[,response])))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "RF Performance (Diff): Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+            text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df[,response][1], predict(rf, train.df[,cols]))), cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df[,response][1], pred.df[,response]))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df[,response][1], pred.df[,response])))), max(c(cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df[,response][1], pred.df[,response]))))), main = paste(tick, "RF Performance (Diff): Prediction"))
+            axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+            text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(train.df[,response], pred.df[,response])), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "RF Performance: Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+            text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(rf, train.df[,cols]),predict(rf, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+
+            ## Plot just predicted performance
+            plot(as.numeric(pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(rf, pred.df[,cols]), pred.df[,response])), max(c(predict(rf, pred.df[,cols]), pred.df[,response]))), main = paste(tick, "RF Performance: Prediction"))
+            axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+            text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(rf, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+
+        ## Get feature importance
+        feat.imp <- varImp(rf)
+        plot(feat.imp, main = paste(tick, "RF Feature Importance"))
+
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, "RF failed"))
+    })
+
+
+    return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+}
+
+startOverall <- Sys.time() #Start Overall timer
+
+notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
+AAPL.close.rf.Rsquared <- doRF(AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)],
+                         AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)],
+                         "AAPL",
+                         "close",
+                         close ~ .,
+                         "Rsquared")
+XOM.close.rf.Rsquared <- doRF(XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)],
+                         XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)],
+                         "XOM",
+                         "close",
+                         close ~ .,
+                         "Rsquared")
+print(Sys.time() - startOverall)
 # AMZN.rf.Rsquared <- doRF(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
 # BA.rf.Rsquared   <- doRF(BA[[1]], BA[[2]], "BA", "Rsquared")
 # DWDP.rf.Rsquared <- doRF(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
