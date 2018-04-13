@@ -150,12 +150,12 @@ doDickey(XOM[[1]], XOM[[2]], "XOM")
 ###########################################
 ###### Generate Random Forest Model #######
 ###########################################
-doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
+doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
     tryCatch({
         ## Write outputs to external files for later review
         par(mfrow=c(1,1))
-        sink(paste0("doRF_", tick, response, xform, "_", metric, ".txt"))
-        pdf(paste0('RFplots_',tick, response, xform, '_', metric, '.pdf'))
+        sink(paste0("doRF_", tick, response, "_", metric, ".txt"))
+        pdf(paste0('RFplots_',tick, response, '_', metric, '.pdf'))
 
         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
         ## Setup data
@@ -165,12 +165,12 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
         ## Create Random Forest Seeds
         # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
         set.seed(123)
-        seeds <- vector(mode = "list", length = 23) #Length based on number of resamples + 1 for final model iteration
-        for(i in 1:22) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
-        seeds[[23]] <- sample.int(1000, 1)
+        seeds <- vector(mode = "list", length = 8) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:7) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[8]] <- sample.int(1000, 1)
 
         ## Setup training parameters
-        ts.control <- trainControl(method="timeslice", initialWindow = 105, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
+        ts.control <- trainControl(method="timeslice", initialWindow = 120, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
         tuneGridRF <- expand.grid(.mtry=c(1:72))
         #metric <- "Rsquared"
 
@@ -201,53 +201,53 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
                     data=data.frame(actual=train.df[,response], pred=predict(rf, train.df[,cols])))
         print(p + geom_point() +
             geom_abline(color="red") +
-            ggtitle(paste(tick, "RandomForest Regression: Training r^2 =", r2.train)))
+            ggtitle(paste(tick, response, "RandomForest Regression: Training r^2 =", r2.train)))
 
         p <- ggplot(aes(x=actual, y=pred),
                     data=data.frame(actual=pred.df[,response], pred=predict(rf, pred.df[,cols])))
         print(p + geom_point() +
             geom_abline(color="red") +
-            ggtitle(paste(tick, "RandomForest Regression: Prediction r^2 =", r2.pred)))
+            ggtitle(paste(tick, response, "RandomForest Regression: Prediction r^2 =", r2.pred)))
 
         if(xform == "diff"){
             ## Plot trained and predicted performance
-            plot(as.numeric(c(cumsum(c(orig.train.df[,response][1], train.df[,response])), cumsum(c(orig.pred.df[,response][1], pred.df[,response])))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "RF Performance (Diff): Training + Prediction"))
+            plot(as.numeric(c(cumsum(c(orig.train.df[,orig.response][1], train.df[,response])), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", main = paste0(tick, " RF Performance (", response, "): Training + Prediction"))
             axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
             text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-            lines(c(cumsum(c(orig.train.df[,response][1], predict(rf, train.df[,cols]))), cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
+            lines(c(cumsum(c(orig.train.df[,orig.response][1], predict(rf, train.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], predict(rf, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
             abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
 
             ## Plot just predicted performance
-            plot(as.numeric(cumsum(c(orig.pred.df[,response][1], pred.df[,response]))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df[,response][1], pred.df[,response])))), max(c(cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df[,response][1], pred.df[,response]))))), main = paste(tick, "RF Performance (Diff): Prediction"))
+            plot(as.numeric(cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,orig.response][1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), max(c(cumsum(c(orig.pred.df[,orig.response][1], predict(rf, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))))), main = paste0(tick, " RF Performance (", response, "): Prediction"))
             axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
             text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-            lines(cumsum(c(orig.pred.df[,response][1], predict(rf, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
+            lines(cumsum(c(orig.pred.df[,orig.response][1], predict(rf, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
         }
-        else{
+        #else{
             ## Plot trained and predicted performance
-            plot(as.numeric(c(train.df[,response], pred.df[,response])), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "RF Performance: Training + Prediction"))
+            plot(as.numeric(c(train.df[,response], pred.df[,response])), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", main = paste0(tick, " RF Performance (", response, "): Training + Prediction"))
             axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
             text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
             lines(c(predict(rf, train.df[,cols]),predict(rf, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
             abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
 
             ## Plot just predicted performance
-            plot(as.numeric(pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(rf, pred.df[,cols]), pred.df[,response])), max(c(predict(rf, pred.df[,cols]), pred.df[,response]))), main = paste(tick, "RF Performance: Prediction"))
+            plot(as.numeric(pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", ylim = c(min(c(predict(rf, pred.df[,cols]), pred.df[,response])), max(c(predict(rf, pred.df[,cols]), pred.df[,response]))), main = paste0(tick, " RF Performance (", response, "): Prediction"))
             axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
             text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
             lines(predict(rf, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
-        }
+        #}
 
         ## Get feature importance
         feat.imp <- varImp(rf)
-        plot(feat.imp, main = paste(tick, "RF Feature Importance"))
+        plot(feat.imp, main = paste(tick, response, "RF Feature Importance"))
 
         on.exit(dev.off())
         on.exit(sink(), add = TRUE)
     }, error = function(e){
         on.exit(dev.off())
         on.exit(sink(), add = TRUE)
-        print(paste(tick, "RF failed"))
+        print(paste(tick, response, "RF failed"))
     })
 
 
@@ -256,368 +256,359 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
 
 startOverall <- Sys.time() #Start Overall timer
 
+## Predict 'close.diff'
+notResponse <- c("close", "return.percent", "volatility", "volatility.diff")
+AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
 notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
-AAPL.close.rf.Rsquared <- doRF(AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)],
-                         AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)],
-                         "AAPL",
-                         "close",
-                         close ~ .,
-                         "Rsquared")
-XOM.close.rf.Rsquared <- doRF(XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)],
-                         XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)],
-                         "XOM",
-                         "close",
-                         close ~ .,
-                         "Rsquared")
+AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
+AAPL.closediff.rf.Rsquared <- doRF(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.rf.Rsquared <- doRF(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
+AAPL.closediff.rf.RMSE <- doRF(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ ., "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.rf.RMSE <- doRF(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ ., "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
+
+#Debug only
+# train.df <- AAPL.train
+# pred.df <- AAPL.pred
+# tick <- "AAPL"
+# response = "close.diff"
+# orig.response = "close"
+# formula = close.diff ~ .
+# metric = "Rsquared"
+# xform = "diff"
+# orig.train.df <- AAPL.train.adder
+# orig.pred.df <- AAPL.pred.adder
+
+
+## Predict 'return.percent'
+notResponse <- c("close", "close.diff", "volatility", "volatility.diff")
+AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
+AAPL.returnpercent.rf.Rsquared <- doRF(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "Rsquared")
+XOM.returnpercent.rf.Rsquared <- doRF(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "Rsquared")
+AAPL.returnpercent.rf.RMSE <- doRF(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "RMSE")
+XOM.returnpercent.rf.RMSE <- doRF(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "RMSE")
+
+## Predict 'volatility.diff'
+notResponse <- c("close", "close.diff", "return.percent", "volatility")
+AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
+AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
+AAPL.volatilitydiff.rf.Rsquared <- doRF(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.rf.Rsquared <- doRF(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+AAPL.volatilitydiff.rf.RMSE <- doRF(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ ., "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.rf.RMSE <- doRF(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+
 print(Sys.time() - startOverall)
-# AMZN.rf.Rsquared <- doRF(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
-# BA.rf.Rsquared   <- doRF(BA[[1]], BA[[2]], "BA", "Rsquared")
-# DWDP.rf.Rsquared <- doRF(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
-# JNJ.rf.Rsquared  <- doRF(JNJ[[1]], JNJ[[2]], "JNJ", "Rsquared")
-# JPM.rf.Rsquared  <- doRF(JPM[[1]], JPM[[2]], "JPM", "Rsquared")
-# NEE.rf.Rsquared  <- doRF(NEE[[1]], NEE[[2]], "NEE", "Rsquared")
-# PG.rf.Rsquared   <- doRF(PG[[1]], PG[[2]], "PG", "Rsquared")
-# SPG.rf.Rsquared  <- doRF(SPG[[1]], SPG[[2]], "SPG", "Rsquared")
-# VZ.rf.Rsquared   <- doRF(VZ[[1]], VZ[[2]], "VZ", "Rsquared")
-# XOM.rf.Rsquared  <- doRF(XOM[[1]], XOM[[2]], "XOM", "Rsquared")
-# 
-# AAPL.rf.RMSE <- doRF(AAPL[[1]], AAPL[[2]], "AAPL", "RMSE")
-# AMZN.rf.RMSE <- doRF(AMZN[[1]], AMZN[[2]], "AMZN", "RMSE")
-# BA.rf.RMSE   <- doRF(BA[[1]], BA[[2]], "BA", "RMSE")
-# DWDP.rf.RMSE <- doRF(DWDP[[1]], DWDP[[2]], "DWDP", "RMSE")
-# JNJ.rf.RMSE  <- doRF(JNJ[[1]], JNJ[[2]], "JNJ", "RMSE")
-# JPM.rf.RMSE  <- doRF(JPM[[1]], JPM[[2]], "JPM", "RMSE")
-# NEE.rf.RMSE  <- doRF(NEE[[1]], NEE[[2]], "NEE", "RMSE")
-# PG.rf.RMSE   <- doRF(PG[[1]], PG[[2]], "PG", "RMSE")
-# SPG.rf.RMSE  <- doRF(SPG[[1]], SPG[[2]], "SPG", "RMSE")
-# VZ.rf.RMSE   <- doRF(VZ[[1]], VZ[[2]], "VZ", "RMSE")
-# XOM.rf.RMSE  <- doRF(XOM[[1]], XOM[[2]], "XOM", "RMSE")
-# 
-# AAPLdiff.rf.Rsquared <- doRF(AAPL[[3]], AAPL[[4]], "AAPL", "Rsquared", "diff", AAPL[[1]], AAPL[[2]])
-# AMZNdiff.rf.Rsquared <- doRF(AMZN[[3]], AMZN[[4]], "AMZN", "Rsquared", "diff", AMZN[[1]], AMZN[[2]])
-# BAdiff.rf.Rsquared   <- doRF(BA[[3]], BA[[4]], "BA", "Rsquared", "diff", BA[[1]], BA[[2]])
-# DWDPdiff.rf.Rsquared <- doRF(DWDP[[3]], DWDP[[4]], "DWDP", "Rsquared", "diff", DWDP[[1]], DWDP[[2]])
-# JNJdiff.rf.Rsquared  <- doRF(JNJ[[3]], JNJ[[4]], "JNJ", "Rsquared", "diff", JNJ[[1]], JNJ[[2]])
-# JPMdiff.rf.Rsquared  <- doRF(JPM[[3]], JPM[[4]], "JPM", "Rsquared", "diff", JPM[[1]], JPM[[2]])
-# NEEdiff.rf.Rsquared  <- doRF(NEE[[3]], NEE[[4]], "NEE", "Rsquared", "diff", NEE[[1]], NEE[[2]])
-# PGdiff.rf.Rsquared   <- doRF(PG[[3]], PG[[4]], "PG", "Rsquared", "diff", PG[[1]], PG[[2]])
-# SPGdiff.rf.Rsquared  <- doRF(SPG[[3]], SPG[[4]], "SPG", "Rsquared", "diff", SPG[[1]], SPG[[2]])
-# VZdiff.rf.Rsquared   <- doRF(VZ[[3]], VZ[[4]], "VZ", "Rsquared", "diff", VZ[[1]], VZ[[2]])
-# XOMdiff.rf.Rsquared  <- doRF(XOM[[3]], XOM[[4]], "XOM", "Rsquared", "diff", XOM[[1]], XOM[[2]])
-# 
-# AAPLdiff.rf.RMSE <- doRF(AAPL[[3]], AAPL[[4]], "AAPL", "RMSE", "diff", AAPL[[1]], AAPL[[2]])
-# AMZNdiff.rf.RMSE <- doRF(AMZN[[3]], AMZN[[4]], "AMZN", "RMSE", "diff", AMZN[[1]], AMZN[[2]])
-# BAdiff.rf.RMSE   <- doRF(BA[[3]], BA[[4]], "BA", "RMSE", "diff", BA[[1]], BA[[2]])
-# DWDPdiff.rf.RMSE <- doRF(DWDP[[3]], DWDP[[4]], "DWDP", "RMSE", "diff", DWDP[[1]], DWDP[[2]])
-# JNJdiff.rf.RMSE  <- doRF(JNJ[[3]], JNJ[[4]], "JNJ", "RMSE", "diff", JNJ[[1]], JNJ[[2]])
-# JPMdiff.rf.RMSE  <- doRF(JPM[[3]], JPM[[4]], "JPM", "RMSE", "diff", JPM[[1]], JPM[[2]])
-# NEEdiff.rf.RMSE  <- doRF(NEE[[3]], NEE[[4]], "NEE", "RMSE", "diff", NEE[[1]], NEE[[2]])
-# PGdiff.rf.RMSE   <- doRF(PG[[3]], PG[[4]], "PG", "RMSE", "diff", PG[[1]], PG[[2]])
-# SPGdiff.rf.RMSE  <- doRF(SPG[[3]], SPG[[4]], "SPG", "RMSE", "diff", SPG[[1]], SPG[[2]])
-# VZdiff.rf.RMSE   <- doRF(VZ[[3]], VZ[[4]], "VZ", "RMSE", "diff", VZ[[1]], VZ[[2]])
-# XOMdiff.rf.RMSE  <- doRF(XOM[[3]], XOM[[4]], "XOM", "RMSE", "diff", XOM[[1]], XOM[[2]])
-# 
-# print(Sys.time() - startOverall)
-# 
-# ###########################################
-# ######### Generate XG Boost Model #########
-# ###########################################
-# doXGB <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
-#     tryCatch({
-#         ## Write outputs to external files for later review
-#         sink(paste0("doXGB_", tick, xform, "_", metric, ".txt"))
-#         pdf(paste0('XGBplots_',tick, xform, '_', metric, '.pdf'))
-#         
-#         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
-#         ## Setup data
-#         ## Setup data
-#         cols <- colnames(train.df)
-#         cols <- cols[!cols %in% c("date", "high")]
-#         X.train <- data.matrix(train.df[,cols])
-#         X.test <- data.matrix(pred.df[,cols])
-#         Y.train <- train.df$high
-#         Y.test <- pred.df$high
-#         
-#         ## Create seeds
-#         set.seed(123)
-#         seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
-#         for(i in 1:43) seeds[[i]] <- sample.int(1000, 12) #sample.int second argument value based on expand.grid nrows
-#         seeds[[44]] <- sample.int(1000, 1)
-#         
-#         ## Setup training parameters
-#         ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE, search = "grid") #35 day cv training, 14 day cv testing
-#         metric <- "RMSE"
-#         tuneGridXGB <- expand.grid( #See parameter descriptions at http://xgboost.readthedocs.io/en/latest/parameter.html
-#             nrounds=350,
-#             eta = c(0.3, 0.5),
-#             gamma = c(0, 1, 5),
-#             max_depth = 6,
-#             colsample_bytree = c(0.5, 1),
-#             subsample = 0.5,
-#             min_child_weight = 1)
-#         
-#         ## Perform training
-#         start <- Sys.time() #Start timer
-#         xgbmod <- train(
-#             x = X.train,
-#             y = Y.train,
-#             method = 'xgbTree',
-#             metric = metric,
-#             trControl = ts.control,
-#             tuneGrid = tuneGridXGB,
-#             importance=TRUE)
-#         print(Sys.time() - start)
-#         cat("\nXGB Output\n")
-#         print(xgbmod)
-#         print(plot(xgbmod))
-#         
-#         ## Evaluate metrics
-#         r2.train <- rSquared(Y.train, Y.train - predict(xgbmod, X.train))
-#         r2.pred <- rSquared(Y.test, Y.test - predict(xgbmod, X.test))
-#         mse.train <- mean((Y.train - predict(xgbmod, X.train))^2)
-#         mse.pred <- mean((Y.test - predict(xgbmod, X.test))^2)
-#         rmse.train <- sqrt(mse.train)
-#         rmse.pred <- sqrt(mse.pred)
-#         mae.train <- mean(abs(Y.train - predict(xgbmod, X.train)))
-#         mae.pred <- mean(abs(Y.test - predict(xgbmod, X.test)))
-#         mape.train <- MAPE(Y.train, predict(xgbmod, X.train))
-#         mape.pred <- MAPE(Y.test, predict(xgbmod, X.test))
-#         
-#         ## Plot Rsquared Evaluation
-#         p <- ggplot(aes(x=actual, y=pred),
-#                     data=data.frame(actual=Y.train, pred=predict(xgbmod, X.train)))
-#         print(p + geom_point() +
-#             geom_abline(color="red") +
-#             ggtitle(paste("XGBoost Regression in R r^2=", r2.train, sep="")))
-#         
-#         p <- ggplot(aes(x=actual, y=pred),
-#                     data=data.frame(actual=Y.test, pred=predict(xgbmod, X.test)))
-#         print(p + geom_point() +
-#             geom_abline(color="red") +
-#             ggtitle(paste("XGBoost Regression in R r^2=", r2.pred, sep="")))
-#         
-#         if(xform == "diff"){
-#             ## Plot trained and predicted performance
-#             plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)), cumsum(c(orig.pred.df$high[1], Y.test)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "XGBoost Performance (Diff): Training + Prediction"))
-#             axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-#             text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-#             lines(c(cumsum(c(orig.train.df$high[1], predict(xgbmod, X.train))), cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test)))), type = "l", lty = 2, lwd = 2, col = "red")
-#             abline(v = length(Y.train)+1, lty = 2, col = "blue")
-#             
-#             ## Plot just predicted performance
-#             plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test)))), max(c(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test))))), main = paste(tick, "XGBoost Performance (Diff): Prediction"))
-#             axis(1, at=1:(length(Y.test)), labels=FALSE)
-#             text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-#             lines(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))), type = "l", lty = 2, lwd = 2, col = "red")
-#         }
-#         else{
-#             ## Plot trained and predicted performance
-#             plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "XGBoost Performance: Training + Prediction"))
-#             axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-#             text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-#             lines(c(predict(xgbmod, train.df[,cols]),predict(xgbmod, X.test)), type = "l", lty = 2, lwd = 2, col = "red")
-#             abline(v = length(Y.train)+1, lty = 2, col = "blue")
-#             
-#             ## Plot just predicted performance
-#             plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(xgbmod, X.test), Y.test)), max(c(predict(xgbmod, X.test), Y.test))), main = paste(tick, "XGBoost Performance: Prediction"))
-#             axis(1, at=1:(length(Y.test)), labels=FALSE)
-#             text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-#             lines(predict(xgbmod, X.test), type = "l", lty = 2, lwd = 2, col = "red")
-#         }
-#         tryCatch({
-#             feat.imp <- varImp(xgbmod)
-#             print(plot(feat.imp, main = paste(tick, "RF Feature Importance")))
-#             
-#             on.exit(dev.off())
-#             on.exit(sink(), add = TRUE)
-#             return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
-#         }, error = function(e){
-#             on.exit(dev.off())
-#             on.exit(sink(), add = TRUE)
-#             return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), NA))
-#         })
-#     }, error = function(e){
-#         on.exit(dev.off())
-#         on.exit(sink(), add = TRUE)
-#         print(paste(tick, "XGB failed"))
-#     })
-#     
-# }
-# 
-# startOverall <- Sys.time() #Start Overall timer
-# 
-# AAPL.xgb.Rsquared <- doXGB(AAPL[[1]], AAPL[[2]], "AAPL", "Rsquared")
-# AMZN.xgb.Rsquared <- doXGB(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
-# BA.xgb.Rsquared   <- doXGB(BA[[1]], BA[[2]], "BA", "Rsquared")
-# DWDP.xgb.Rsquared <- doXGB(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
-# JNJ.xgb.Rsquared  <- doXGB(JNJ[[1]], JNJ[[2]], "JNJ", "Rsquared")
-# JPM.xgb.Rsquared  <- doXGB(JPM[[1]], JPM[[2]], "JPM", "Rsquared")
-# NEE.xgb.Rsquared  <- doXGB(NEE[[1]], NEE[[2]], "NEE", "Rsquared")
-# PG.xgb.Rsquared   <- doXGB(PG[[1]], PG[[2]], "PG", "Rsquared")
-# SPG.xgb.Rsquared  <- doXGB(SPG[[1]], SPG[[2]], "SPG", "Rsquared")
-# VZ.xgb.Rsquared   <- doXGB(VZ[[1]], VZ[[2]], "VZ", "Rsquared")
-# XOM.xgb.Rsquared  <- doXGB(XOM[[1]], XOM[[2]], "XOM", "Rsquared")
-# 
-# AAPL.xgb.RMSE <- doXGB(AAPL[[1]], AAPL[[2]], "AAPL", "RMSE")
-# AMZN.xgb.RMSE <- doXGB(AMZN[[1]], AMZN[[2]], "AMZN", "RMSE")
-# BA.xgb.RMSE   <- doXGB(BA[[1]], BA[[2]], "BA", "RMSE")
-# DWDP.xgb.RMSE <- doXGB(DWDP[[1]], DWDP[[2]], "DWDP", "RMSE")
-# JNJ.xgb.RMSE  <- doXGB(JNJ[[1]], JNJ[[2]], "JNJ", "RMSE")
-# JPM.xgb.RMSE  <- doXGB(JPM[[1]], JPM[[2]], "JPM", "RMSE")
-# NEE.xgb.RMSE  <- doXGB(NEE[[1]], NEE[[2]], "NEE", "RMSE")
-# PG.xgb.RMSE   <- doXGB(PG[[1]], PG[[2]], "PG", "RMSE")
-# SPG.xgb.RMSE  <- doXGB(SPG[[1]], SPG[[2]], "SPG", "RMSE")
-# VZ.xgb.RMSE   <- doXGB(VZ[[1]], VZ[[2]], "VZ", "RMSE")
-# XOM.xgb.RMSE  <- doXGB(XOM[[1]], XOM[[2]], "XOM", "RMSE")
-# 
-# AAPLdiff.xgb.Rsquared <- doXGB(AAPL[[3]], AAPL[[4]], "AAPL", "Rsquared", "diff", AAPL[[1]], AAPL[[2]])
-# AMZNdiff.xgb.Rsquared <- doXGB(AMZN[[3]], AMZN[[4]], "AMZN", "Rsquared", "diff", AMZN[[1]], AMZN[[2]])
-# BAdiff.xgb.Rsquared   <- doXGB(BA[[3]], BA[[4]], "BA", "Rsquared", "diff", BA[[1]], BA[[2]])
-# DWDPdiff.xgb.Rsquared <- doXGB(DWDP[[3]], DWDP[[4]], "DWDP", "Rsquared", "diff", DWDP[[1]], DWDP[[2]])
-# JNJdiff.xgb.Rsquared  <- doXGB(JNJ[[3]], JNJ[[4]], "JNJ", "Rsquared", "diff", JNJ[[1]], JNJ[[2]])
-# JPMdiff.xgb.Rsquared  <- doXGB(JPM[[3]], JPM[[4]], "JPM", "Rsquared", "diff", JPM[[1]], JPM[[2]])
-# NEEdiff.xgb.Rsquared  <- doXGB(NEE[[3]], NEE[[4]], "NEE", "Rsquared", "diff", NEE[[1]], NEE[[2]])
-# PGdiff.xgb.Rsquared   <- doXGB(PG[[3]], PG[[4]], "PG", "Rsquared", "diff", PG[[1]], PG[[2]])
-# SPGdiff.xgb.Rsquared  <- doXGB(SPG[[3]], SPG[[4]], "SPG", "Rsquared", "diff", SPG[[1]], SPG[[2]])
-# VZdiff.xgb.Rsquared   <- doXGB(VZ[[3]], VZ[[4]], "VZ", "Rsquared", "diff", VZ[[1]], VZ[[2]])
-# XOMdiff.xgb.Rsquared  <- doXGB(XOM[[3]], XOM[[4]], "XOM", "Rsquared", "diff", XOM[[1]], XOM[[2]])
-# 
-# AAPLdiff.xgb.RMSE <- doXGB(AAPL[[3]], AAPL[[4]], "AAPL", "RMSE", "diff", AAPL[[1]], AAPL[[2]])
-# AMZNdiff.xgb.RMSE <- doXGB(AMZN[[3]], AMZN[[4]], "AMZN", "RMSE", "diff", AMZN[[1]], AMZN[[2]])
-# BAdiff.xgb.RMSE   <- doXGB(BA[[3]], BA[[4]], "BA", "RMSE", "diff", BA[[1]], BA[[2]])
-# DWDPdiff.xgb.RMSE <- doXGB(DWDP[[3]], DWDP[[4]], "DWDP", "RMSE", "diff", DWDP[[1]], DWDP[[2]])
-# JNJdiff.xgb.RMSE  <- doXGB(JNJ[[3]], JNJ[[4]], "JNJ", "RMSE", "diff", JNJ[[1]], JNJ[[2]])
-# JPMdiff.xgb.RMSE  <- doXGB(JPM[[3]], JPM[[4]], "JPM", "RMSE", "diff", JPM[[1]], JPM[[2]])
-# NEEdiff.xgb.RMSE  <- doXGB(NEE[[3]], NEE[[4]], "NEE", "RMSE", "diff", NEE[[1]], NEE[[2]])
-# PGdiff.xgb.RMSE   <- doXGB(PG[[3]], PG[[4]], "PG", "RMSE", "diff", PG[[1]], PG[[2]])
-# SPGdiff.xgb.RMSE  <- doXGB(SPG[[3]], SPG[[4]], "SPG", "RMSE", "diff", SPG[[1]], SPG[[2]])
-# VZdiff.xgb.RMSE   <- doXGB(VZ[[3]], VZ[[4]], "VZ", "RMSE", "diff", VZ[[1]], VZ[[2]])
-# XOMdiff.xgb.RMSE  <- doXGB(XOM[[3]], XOM[[4]], "XOM", "RMSE", "diff", XOM[[1]], XOM[[2]])
-# 
-# print(Sys.time() - startOverall)
-# 
-# 
-# ####################################################
-# ######### Generate Linear Regression Model #########
-# ####################################################
-# doLM <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
-#     tryCatch({    
-#         ## Write outputs to external files for later review
-#         sink(paste0("doLM_", tick, xform, "_", metric, ".txt"))
-#         pdf(paste0('LMplots_',tick, xform, "_", metric, '.pdf'))
-#         
-#         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
-#         ## Setup data
-#         cols <- colnames(train.df)
-#         cols <- cols[!cols %in% "date"]
-#         
-#         X.train <- train.df[,cols]
-#         X.test <- pred.df[,cols]
-#         Y.train <- train.df$high
-#         Y.test <- pred.df$high
-#         
-#         ## Check for and remove collinearity between variables
-#         repeat{
-#             lc <- findLinearCombos(X.train[,!(colnames(X.train) %in% "high")])
-#             if(!is.null(lc$remove)){
-#                 X.train <- X.train[,-lc$remove]
-#                 X.test <- X.test[,-lc$remove]
-#             }
-#             else break
-#         }
-#         
-#         ## Create Random Forest seeds
-#         set.seed(123)
-#         
-#         ## Setup training parameters
-#         ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE) #35 day cv training, 14 day cv testing
-#         tuneLength.num <- 2
-#         #metric <- "RMSE"
-#         
-#         ## Perform training
-#         start <- Sys.time() #Start timer
-#         lm.mod <- train(high ~ ., data = X.train,
-#                         method = "lm",
-#                         metric = metric,
-#                         trControl = ts.control,
-#                         tuneLength=tuneLength.num)
-#         print(Sys.time() - start)
-#         cat("\nRF Output\n")
-#         print(lm.mod)
-#         
-#         ## Evaluate metrics
-#         r2.train <- rSquared(train.df$high, train.df$high - predict(lm.mod, train.df[,cols]))
-#         r2.pred <- rSquared(pred.df$high, pred.df$high - predict(lm.mod, pred.df[,cols]))
-#         mse.train <- mean((train.df$high - predict(lm.mod, train.df[,cols]))^2)
-#         mse.pred <- mean((pred.df$high - predict(lm.mod, pred.df[,cols]))^2)
-#         rmse.train <- sqrt(mse.train)
-#         rmse.pred <- sqrt(mse.pred)
-#         mae.train <- mean(abs(train.df$high - predict(lm.mod, train.df[,cols])))
-#         mae.pred <- mean(abs(pred.df$high - predict(lm.mod, pred.df[,cols])))
-#         mape.train <- MAPE(train.df$high, predict(lm.mod, train.df[,cols]))
-#         mape.pred <- MAPE(pred.df$high, predict(lm.mod, pred.df[,cols]))
-#         
-#         
-#         ## Plot Rsquared Evaluation
-#         p <- ggplot(aes(x=actual, y=pred),
-#                     data=data.frame(actual=Y.train, pred=predict(lm.mod, X.train)))
-#         print(p + geom_point() +
-#             geom_abline(color="red") +
-#             ggtitle(paste(tick, "Linear Regression: Training r^2 =", r2.train)))
-#         
-#         p <- ggplot(aes(x=actual, y=pred),
-#                     data=data.frame(actual=pred.df$high, pred=predict(lm.mod, pred.df[,cols])))
-#         print(p + geom_point() +
-#             geom_abline(color="red") +
-#             ggtitle(paste(tick, "Linear Regression: Prediction r^2 =", r2.pred)))
-#         
-#         if(xform == "diff"){
-#             ## Plot trained and predicted performance
-#             plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)), cumsum(c(orig.pred.df$high[1], Y.test)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", main = paste(tick, "LM Performance (Diff): Training + Prediction"))
-#             axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-#             text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-#             lines(c(cumsum(c(orig.train.df$high[1], predict(lm.mod, X.train))), cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test)))), type = "l", lty = 2, lwd = 2, col = "red")
-#             abline(v = length(Y.train)+1, lty = 2, col = "blue")
-#     
-#             ## Plot just predicted performance
-#             plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test)))), max(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), cumsum(c(orig.pred.df$high[1], Y.test))))), main = paste(tick, "LM Performance (Diff): Prediction"))
-#             axis(1, at=1:(length(Y.test)), labels=FALSE)
-#             text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-#             lines(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))), type = "l", lty = 2, lwd = 2, col = "red")
-#         }
-#         else{
-#             ## Plot trained and predicted performance
-#             plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", main = paste(tick, "LM Performance: Training + Prediction"))
-#             axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-#             text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-#             lines(c(predict(lm.mod, train.df[,cols]),predict(lm.mod, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
-#             abline(v = length(Y.train)+1, lty = 2, col = "blue")
-#     
-#             ## Plot just predicted performance
-#             plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price", xaxt = "n", ylim = c(min(c(predict(lm.mod, pred.df[,cols]), Y.test)), max(c(predict(lm.mod, pred.df[,cols]), Y.test))), main = paste(tick, "LM Performance: Prediction"))
-#             axis(1, at=1:(length(Y.test)), labels=FALSE)
-#             text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-#             lines(predict(lm.mod, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
-#         }
-#     
-#         ## Get coefficients and confidence intervals
-#         coeffs <- coef(lm.mod$finalModel)
-#         confints <- confint(lm.mod$finalModel)
-#         cat("/nCoefficients/n")
-#         print(coeffs)
-#         cat("/nConfidence Intervals/n")
-#         print(confints)
-#         
-#         on.exit(dev.off())
-#         on.exit(sink(), add = TRUE)
-#     }, error = function(e){
-#         on.exit(dev.off())
-#         on.exit(sink(), add = TRUE)
-#         print(paste(tick, "LM failed"))
-#     })
-# 
-#     return(list(lm.mod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), coeffs, confints))
-# }
+
+###########################################
+######### Generate XG Boost Model #########
+###########################################
+doXGB <- function(train.df, pred.df, tick, response, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
+    tryCatch({
+        ## Write outputs to external files for later review
+        sink(paste0("doXGB_", tick, response, "_", metric, ".txt"))
+        pdf(paste0('XGBplots_',tick, response, '_', metric, '.pdf'))
+
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% c("date", response)]
+        X.train <- data.matrix(train.df[,cols])
+        X.test <- data.matrix(pred.df[,cols])
+        Y.train <- train.df[,response]
+        Y.test <- pred.df[,response]
+
+        ## Create seeds
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 8) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:7) seeds[[i]] <- sample.int(1000, 12) #sample.int second argument value based on expand.grid nrows
+        seeds[[8]] <- sample.int(1000, 1)
+
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 120, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, search = "grid") #35 day cv training, 14 day cv testing
+        #metric <- "RMSE"
+        tuneGridXGB <- expand.grid( #See parameter descriptions at http://xgboost.readthedocs.io/en/latest/parameter.html
+            nrounds=350,
+            eta = c(0.3, 0.5),
+            gamma = c(0, 1, 5),
+            max_depth = 6,
+            colsample_bytree = c(0.5, 1),
+            subsample = 0.5,
+            min_child_weight = 1)
+
+        ## Perform training
+        start <- Sys.time() #Start timer
+        xgbmod <- train(
+            x = X.train,
+            y = as.numeric(Y.train),
+            method = 'xgbTree',
+            metric = metric,
+            trControl = ts.control,
+            tuneGrid = tuneGridXGB,
+            importance=TRUE)
+        print(Sys.time() - start)
+        cat("\nXGB Output\n")
+        print(xgbmod)
+        print(plot(xgbmod))
+
+        ## Evaluate metrics
+        r2.train <- rSquared(Y.train, Y.train - predict(xgbmod, X.train))
+        r2.pred <- rSquared(Y.test, Y.test - predict(xgbmod, X.test))
+        mse.train <- mean((Y.train - predict(xgbmod, X.train))^2)
+        mse.pred <- mean((Y.test - predict(xgbmod, X.test))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(Y.train - predict(xgbmod, X.train)))
+        mae.pred <- mean(abs(Y.test - predict(xgbmod, X.test)))
+        mape.train <- MAPE(Y.train, predict(xgbmod, X.train))
+        mape.pred <- MAPE(Y.test, predict(xgbmod, X.test))
+
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.train, pred=predict(xgbmod, X.train)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, response, "XGBoost Regression in R r^2 =", r2.train)))
+
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.test, pred=predict(xgbmod, X.test)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, response, "XGBoost Regression in R r^2 =", r2.pred)))
+
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df[,orig.response][1], Y.train)), cumsum(c(orig.pred.df[,orig.response][1], Y.test)))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", main = paste0(tick, " XGBoost Performance (", response, "): Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df[,orig.response][1], predict(xgbmod, X.train))), cumsum(c(orig.pred.df[,orig.response][1], predict(xgbmod, X.test)))), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df[,orig.response][1], Y.test))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,orig.response][1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df[,orig.response][1], Y.test)))), max(c(cumsum(c(orig.pred.df[,orig.response][1], predict(xgbmod, X.test))), cumsum(c(orig.pred.df[,orig.response][1], Y.test))))), main = paste0(tick, " XGBoost Performance (", response, "): Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df[,orig.response][1], predict(xgbmod, X.test))), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        #else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", main = paste0(tick, " XGBoost Performance (", response, "): Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(xgbmod, train.df[,cols]),predict(xgbmod, X.test)), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+
+            ## Plot just predicted performance
+            plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", ylim = c(min(c(predict(xgbmod, X.test), Y.test)), max(c(predict(xgbmod, X.test), Y.test))), main = paste0(tick, " XGBoost Performance (", response, "): Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(xgbmod, X.test), type = "l", lty = 2, lwd = 2, col = "red")
+        #}
+        tryCatch({
+            feat.imp <- varImp(xgbmod)
+            print(plot(feat.imp, main = paste(tick, "XGBoost Feature Importance")))
+
+            on.exit(dev.off())
+            on.exit(sink(), add = TRUE)
+            return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+        }, error = function(e){
+            on.exit(dev.off())
+            on.exit(sink(), add = TRUE)
+            return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), NA))
+        })
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, response, "XGB failed"))
+    })
+
+}
+ 
+startOverall <- Sys.time() #Start Overall timer
+
+## Predict 'close.diff'
+notResponse <- c("close", "return.percent", "volatility", "volatility.diff")
+AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
+AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
+AAPL.closediff.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close.diff", "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.xgb.Rsquared <- doXGB(XOM.train, XOM.pred, "XOM", "close.diff", "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
+AAPL.closediff.xgb.RMSE <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close.diff", "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "close.diff", "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
+
+## Predict 'return.percent'
+notResponse <- c("close", "close.diff", "volatility", "volatility.diff")
+AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
+AAPL.returnpercent.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "return.percent", "Rsquared")
+XOM.returnpercent.xgb.Rsquared <- doXGB(XOM.train, XOM.pred, "XOM", "return.percent", "Rsquared")
+AAPL.returnpercent.xgb.RMSE <- doXGB(AAPL.train, AAPL.pred, "AAPL", "return.percent", "RMSE")
+XOM.returnpercent.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "return.percent", "RMSE")
+
+#Debug only
+# train.df <- AAPL.train
+# pred.df <- AAPL.pred
+# tick <- "AAPL"
+# response = "return.percent"
+# orig.response = response
+# metric = "Rsquared"
+# xform = ""
+# orig.train.df <- train.df
+# orig.pred.df <- pred.df
+
+## Predict 'volatility.diff'
+notResponse <- c("close", "close.diff", "return.percent", "volatility")
+AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
+AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
+AAPL.volatilitydiff.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.xgb.Rsquared <- doXGB(XOM.train, XOM.pred, "XOM", "volatility.diff", "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+AAPL.volatilitydiff.xgb.RMSE <- doXGB(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "volatility.diff", "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+
+print(Sys.time() - startOverall)
+
+
+####################################################
+######### Generate KNN Regression Model ############
+####################################################
+doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
+    tryCatch({
+        ## Write outputs to external files for later review
+        par(mfrow=c(1,1))
+        sink(paste0("doKNN_", tick, response, "_", metric, ".txt"))
+        pdf(paste0('KNNplots_',tick, response, '_', metric, '.pdf'))
+        
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
+        
+        ## Create Random Forest Seeds
+        # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 8) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:7) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[8]] <- sample.int(1000, 1)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 120, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
+        tuneGridKNN <- expand.grid(k=c(1:72))
+        #metric <- "Rsquared"
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        knn <- train(formula, data = train.df[,cols], method = "knn", metric = metric, trControl = ts.control, tuneGrid = tuneGridKNN, importance=TRUE)#, preProcess = "scale")
+        print(Sys.time() - start)
+        #tuneGridRF <- expand.grid(.mtry=22)
+        #rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE) #AAPL best mtry = 22
+        cat("\nKNN Output\n")
+        print(knn)
+        print(plot(knn))
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df[,response], train.df[,response] - predict(knn, train.df[,cols]))
+        r2.pred <- rSquared(pred.df[,response], pred.df[,response] - predict(knn, pred.df[,cols]))
+        mse.train <- mean((train.df[,response] - predict(knn, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df[,response] - predict(knn, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df[,response] - predict(knn, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df[,response] - predict(knn, pred.df[,cols])))
+        mape.train <- MAPE(train.df[,response], predict(knn, train.df[,cols]))
+        mape.pred <- MAPE(pred.df[,response], predict(knn, pred.df[,cols]))
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=train.df[,response], pred=predict(knn, train.df[,cols])))
+        print(p + geom_point() +
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "KNN Regression: Training r^2 =", r2.train)))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df[,response], pred=predict(knn, pred.df[,cols])))
+        print(p + geom_point() +
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "KNN Regression: Prediction r^2 =", r2.pred)))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df[,orig.response][1], train.df[,response])), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", main = paste0(tick, " KNN Performance (", response, "): Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+            text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df[,orig.response][1], predict(knn, train.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), max(c(cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))))), main = paste0(tick, " KNN Performance (", response, "): Prediction"))
+            axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+            text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        #else{
+        ## Plot trained and predicted performance
+        plot(as.numeric(c(train.df[,response], pred.df[,response])), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", main = paste0(tick, " KNN Performance (", response, "): Training + Prediction"))
+        axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+        text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+        lines(c(predict(knn, train.df[,cols]),predict(knn, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+        abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+        
+        ## Plot just predicted performance
+        plot(as.numeric(pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", ylim = c(min(c(predict(knn, pred.df[,cols]), pred.df[,response])), max(c(predict(knn, pred.df[,cols]), pred.df[,response]))), main = paste0(tick, " KNN Performance (", response, "): Prediction"))
+        axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+        text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+        lines(predict(knn, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+        #}
+        
+        ## Get feature importance
+        feat.imp <- varImp(knn)
+        plot(feat.imp, main = paste(tick, response, "KNN Feature Importance"))
+        
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, response, "RF failed"))
+    })
+    
+    
+    return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+}
 # 
 # startOverall <- Sys.time() #Start Overall timer
 # 
