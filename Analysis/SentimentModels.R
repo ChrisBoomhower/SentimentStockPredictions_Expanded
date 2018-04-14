@@ -104,7 +104,7 @@ mergeSentiment <- function(df, tick){
                                              "volatility",
                                              "volatility.diff")],
                             by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-    tickSent.train <- tickSent.train[tickSent.train$date > "2018-02-26" & tickSent.train$date <= "2018-03-30",] #Incomplete sentiment data before 2-26-18
+    tickSent.train <- tickSent.train[tickSent.train$date > "2018-02-26" & tickSent.train$date <= "2018-04-04",] #Incomplete sentiment data before 2-26-18
     tickSent.train[is.na(tickSent.train)] <- 0 #Fill any NA sentiment scores with 0
     colnames(tickSent.train) <- gsub(x = colnames(tickSent.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
     
@@ -117,7 +117,7 @@ mergeSentiment <- function(df, tick){
                                             "volatility",
                                             "volatility.diff")],
                            by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
-    tickSent.pred <- tickSent.pred[tickSent.pred$date > "2018-03-30" & tickSent.pred$date <= "2018-04-09",] #20% of data set aside for predictions
+    tickSent.pred <- tickSent.pred[tickSent.pred$date > "2018-04-04" & tickSent.pred$date <= "2018-04-13",] #20% of data set aside for predictions
     tickSent.pred[is.na(tickSent.pred)] <- 0 #Fill any NA sentiment scores with 0
     colnames(tickSent.pred) <- gsub(x = colnames(tickSent.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
 
@@ -165,12 +165,12 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
         ## Create Random Forest Seeds
         # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
         set.seed(123)
-        seeds <- vector(mode = "list", length = 8) #Length based on number of resamples + 1 for final model iteration
-        for(i in 1:7) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
-        seeds[[8]] <- sample.int(1000, 1)
+        seeds <- vector(mode = "list", length = 79) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:78) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[79]] <- sample.int(1000, 1)
 
         ## Setup training parameters
-        ts.control <- trainControl(method="timeslice", initialWindow = 120, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
+        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #120 hour initial cv training, 35 hour cv testing
         tuneGridRF <- expand.grid(.mtry=c(1:72))
         #metric <- "Rsquared"
 
@@ -257,16 +257,27 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
 startOverall <- Sys.time() #Start Overall timer
 
 ## Predict 'close.diff'
-notResponse <- c("close", "return.percent", "volatility", "volatility.diff")
-AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
-notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
-AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+setup_close.diff <- function(){
+    notResponse <- c("close", "return.percent", "volatility", "volatility.diff")
+    assign("AAPL.train", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("AAPL.pred", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.train", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.pred", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    #AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+    #AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+    #XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+    #XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+    notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
+    assign("AAPL.train.adder", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("AAPL.pred.adder", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.train.adder", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.pred.adder", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    #AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+    #AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+    #XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+    #XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+}
+setup_close.diff()
 
 AAPL.closediff.rf.Rsquared <- doRF(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
 XOM.closediff.rf.Rsquared <- doRF(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
@@ -287,11 +298,18 @@ XOM.closediff.rf.RMSE <- doRF(XOM.train, XOM.pred, "XOM", "close.diff", close.di
 
 
 ## Predict 'return.percent'
-notResponse <- c("close", "close.diff", "volatility", "volatility.diff")
-AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+setup_return.percent <- function(){
+    notResponse <- c("close", "close.diff", "volatility", "volatility.diff")
+    assign("AAPL.train", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("AAPL.pred", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.train", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.pred", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    #AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+    #AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+    #XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+    #XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+}
+setup_return.percent()
 
 AAPL.returnpercent.rf.Rsquared <- doRF(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "Rsquared")
 XOM.returnpercent.rf.Rsquared <- doRF(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "Rsquared")
@@ -299,16 +317,27 @@ AAPL.returnpercent.rf.RMSE <- doRF(AAPL.train, AAPL.pred, "AAPL", "return.percen
 XOM.returnpercent.rf.RMSE <- doRF(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "RMSE")
 
 ## Predict 'volatility.diff'
-notResponse <- c("close", "close.diff", "return.percent", "volatility")
-AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
-notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
-AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+setup_volatility.diff <- function(){
+    notResponse <- c("close", "close.diff", "return.percent", "volatility")
+    assign("AAPL.train", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("AAPL.pred", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.train", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.pred", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    #AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+    #AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+    #XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+    #XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+    notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
+    assign("AAPL.train.adder", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("AAPL.pred.adder", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.train.adder", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.pred.adder", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    #AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+    #AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+    #XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+    #XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+}
+setup_volatility.diff()
 
 AAPL.volatilitydiff.rf.Rsquared <- doRF(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
 XOM.volatilitydiff.rf.Rsquared <- doRF(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
@@ -316,6 +345,11 @@ AAPL.volatilitydiff.rf.RMSE <- doRF(AAPL.train, AAPL.pred, "AAPL", "volatility.d
 XOM.volatilitydiff.rf.RMSE <- doRF(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
 
 print(Sys.time() - startOverall)
+
+## Save models and metrics to external RDS
+for(m in ls(pattern = '\\.rf\\.')){
+    saveRDS(get(m), paste0('Data/ModelRDS/', m, '.RDS'))
+}
 
 ###########################################
 ######### Generate XG Boost Model #########
@@ -337,12 +371,12 @@ doXGB <- function(train.df, pred.df, tick, response, metric, xform = "", orig.tr
 
         ## Create seeds
         set.seed(123)
-        seeds <- vector(mode = "list", length = 8) #Length based on number of resamples + 1 for final model iteration
-        for(i in 1:7) seeds[[i]] <- sample.int(1000, 12) #sample.int second argument value based on expand.grid nrows
-        seeds[[8]] <- sample.int(1000, 1)
+        seeds <- vector(mode = "list", length = 79) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:78) seeds[[i]] <- sample.int(1000, 12) #sample.int second argument value based on expand.grid nrows
+        seeds[[79]] <- sample.int(1000, 1)
 
         ## Setup training parameters
-        ts.control <- trainControl(method="timeslice", initialWindow = 120, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, search = "grid") #35 day cv training, 14 day cv testing
+        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #35 day cv training, 14 day cv testing
         #metric <- "RMSE"
         tuneGridXGB <- expand.grid( #See parameter descriptions at http://xgboost.readthedocs.io/en/latest/parameter.html
             nrounds=350,
@@ -444,16 +478,17 @@ doXGB <- function(train.df, pred.df, tick, response, metric, xform = "", orig.tr
 startOverall <- Sys.time() #Start Overall timer
 
 ## Predict 'close.diff'
-notResponse <- c("close", "return.percent", "volatility", "volatility.diff")
-AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
-notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
-AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+# notResponse <- c("close", "return.percent", "volatility", "volatility.diff")
+# AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+# AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+# XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+# XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+# notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
+# AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+# AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+# XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+# XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+setup_close.diff()
 
 AAPL.closediff.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close.diff", "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
 XOM.closediff.xgb.Rsquared <- doXGB(XOM.train, XOM.pred, "XOM", "close.diff", "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
@@ -461,11 +496,12 @@ AAPL.closediff.xgb.RMSE <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close.diff", "R
 XOM.closediff.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "close.diff", "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
 
 ## Predict 'return.percent'
-notResponse <- c("close", "close.diff", "volatility", "volatility.diff")
-AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+# notResponse <- c("close", "close.diff", "volatility", "volatility.diff")
+# AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+# AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+# XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+# XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+setup_return.percent()
 
 AAPL.returnpercent.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "return.percent", "Rsquared")
 XOM.returnpercent.xgb.Rsquared <- doXGB(XOM.train, XOM.pred, "XOM", "return.percent", "Rsquared")
@@ -484,16 +520,17 @@ XOM.returnpercent.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "return.percent"
 # orig.pred.df <- pred.df
 
 ## Predict 'volatility.diff'
-notResponse <- c("close", "close.diff", "return.percent", "volatility")
-AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
-notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
-AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+# notResponse <- c("close", "close.diff", "return.percent", "volatility")
+# AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+# AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+# XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+# XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+# notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
+# AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
+# AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
+# XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
+# XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+setup_volatility.diff()
 
 AAPL.volatilitydiff.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
 XOM.volatilitydiff.xgb.Rsquared <- doXGB(XOM.train, XOM.pred, "XOM", "volatility.diff", "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
@@ -521,12 +558,12 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
         ## Create Random Forest Seeds
         # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
         set.seed(123)
-        seeds <- vector(mode = "list", length = 8) #Length based on number of resamples + 1 for final model iteration
-        for(i in 1:7) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
-        seeds[[8]] <- sample.int(1000, 1)
+        seeds <- vector(mode = "list", length = 79) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:78) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[79]] <- sample.int(1000, 1)
         
         ## Setup training parameters
-        ts.control <- trainControl(method="timeslice", initialWindow = 120, horizon = 35, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
+        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
         tuneGridKNN <- expand.grid(k=c(1:72))
         #metric <- "Rsquared"
         
@@ -609,59 +646,53 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
     
     return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
 }
-# 
-# startOverall <- Sys.time() #Start Overall timer
-# 
-# AAPL.lm.Rsquared <- doLM(AAPL[[1]], AAPL[[2]], "AAPL", "Rsquared")
-# AMZN.lm.Rsquared <- doLM(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
-# BA.lm.Rsquared   <- doLM(BA[[1]], BA[[2]], "BA", "Rsquared")
-# DWDP.lm.Rsquared <- doLM(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
-# JNJ.lm.Rsquared  <- doLM(JNJ[[1]], JNJ[[2]], "JNJ", "Rsquared")
-# JPM.lm.Rsquared  <- doLM(JPM[[1]], JPM[[2]], "JPM", "Rsquared")
-# NEE.lm.Rsquared  <- doLM(NEE[[1]], NEE[[2]], "NEE", "Rsquared")
-# PG.lm.Rsquared   <- doLM(PG[[1]], PG[[2]], "PG", "Rsquared")
-# SPG.lm.Rsquared  <- doLM(SPG[[1]], SPG[[2]], "SPG", "Rsquared")
-# VZ.lm.Rsquared   <- doLM(VZ[[1]], VZ[[2]], "VZ", "Rsquared")
-# XOM.lm.Rsquared  <- doLM(XOM[[1]], XOM[[2]], "XOM", "Rsquared")
-# 
-# AAPL.lm.RMSE <- doLM(AAPL[[1]], AAPL[[2]], "AAPL", "RMSE")
-# AMZN.lm.RMSE <- doLM(AMZN[[1]], AMZN[[2]], "AMZN", "RMSE")
-# BA.lm.RMSE   <- doLM(BA[[1]], BA[[2]], "BA", "RMSE")
-# DWDP.lm.RMSE <- doLM(DWDP[[1]], DWDP[[2]], "DWDP", "RMSE")
-# JNJ.lm.RMSE  <- doLM(JNJ[[1]], JNJ[[2]], "JNJ", "RMSE")
-# JPM.lm.RMSE  <- doLM(JPM[[1]], JPM[[2]], "JPM", "RMSE")
-# NEE.lm.RMSE  <- doLM(NEE[[1]], NEE[[2]], "NEE", "RMSE")
-# PG.lm.RMSE   <- doLM(PG[[1]], PG[[2]], "PG", "RMSE")
-# SPG.lm.RMSE  <- doLM(SPG[[1]], SPG[[2]], "SPG", "RMSE")
-# VZ.lm.RMSE   <- doLM(VZ[[1]], VZ[[2]], "VZ", "RMSE")
-# XOM.lm.RMSE  <- doLM(XOM[[1]], XOM[[2]], "XOM", "RMSE")
-# 
-# AAPLdiff.lm.Rsquared <- doLM(AAPL[[3]], AAPL[[4]], "AAPL", "Rsquared", "diff", AAPL[[1]], AAPL[[2]])
-# AMZNdiff.lm.Rsquared <- doLM(AMZN[[3]], AMZN[[4]], "AMZN", "Rsquared", "diff", AMZN[[1]], AMZN[[2]])
-# BAdiff.lm.Rsquared   <- doLM(BA[[3]], BA[[4]], "BA", "Rsquared", "diff", BA[[1]], BA[[2]])
-# DWDPdiff.lm.Rsquared <- doLM(DWDP[[3]], DWDP[[4]], "DWDP", "Rsquared", "diff", DWDP[[1]], DWDP[[2]])
-# JNJdiff.lm.Rsquared  <- doLM(JNJ[[3]], JNJ[[4]], "JNJ", "Rsquared", "diff", JNJ[[1]], JNJ[[2]])
-# JPMdiff.lm.Rsquared  <- doLM(JPM[[3]], JPM[[4]], "JPM", "Rsquared", "diff", JPM[[1]], JPM[[2]])
-# NEEdiff.lm.Rsquared  <- doLM(NEE[[3]], NEE[[4]], "NEE", "Rsquared", "diff", NEE[[1]], NEE[[2]])
-# PGdiff.lm.Rsquared   <- doLM(PG[[3]], PG[[4]], "PG", "Rsquared", "diff", PG[[1]], PG[[2]])
-# SPGdiff.lm.Rsquared  <- doLM(SPG[[3]], SPG[[4]], "SPG", "Rsquared", "diff", SPG[[1]], SPG[[2]])
-# VZdiff.lm.Rsquared   <- doLM(VZ[[3]], VZ[[4]], "VZ", "Rsquared", "diff", VZ[[1]], VZ[[2]])
-# XOMdiff.lm.Rsquared  <- doLM(XOM[[3]], XOM[[4]], "XOM", "Rsquared", "diff", XOM[[1]], XOM[[2]])
-# 
-# AAPLdiff.lm.RMSE <- doLM(AAPL[[3]], AAPL[[4]], "AAPL", "RMSE", "diff", AAPL[[1]], AAPL[[2]])
-# AMZNdiff.lm.RMSE <- doLM(AMZN[[3]], AMZN[[4]], "AMZN", "RMSE", "diff", AMZN[[1]], AMZN[[2]])
-# BAdiff.lm.RMSE   <- doLM(BA[[3]], BA[[4]], "BA", "RMSE", "diff", BA[[1]], BA[[2]])
-# DWDPdiff.lm.RMSE <- doLM(DWDP[[3]], DWDP[[4]], "DWDP", "RMSE", "diff", DWDP[[1]], DWDP[[2]])
-# JNJdiff.lm.RMSE  <- doLM(JNJ[[3]], JNJ[[4]], "JNJ", "RMSE", "diff", JNJ[[1]], JNJ[[2]])
-# JPMdiff.lm.RMSE  <- doLM(JPM[[3]], JPM[[4]], "JPM", "RMSE", "diff", JPM[[1]], JPM[[2]])
-# NEEdiff.lm.RMSE  <- doLM(NEE[[3]], NEE[[4]], "NEE", "RMSE", "diff", NEE[[1]], NEE[[2]])
-# PGdiff.lm.RMSE   <- doLM(PG[[3]], PG[[4]], "PG", "RMSE", "diff", PG[[1]], PG[[2]])
-# SPGdiff.lm.RMSE  <- doLM(SPG[[3]], SPG[[4]], "SPG", "RMSE", "diff", SPG[[1]], SPG[[2]])
-# VZdiff.lm.RMSE   <- doLM(VZ[[3]], VZ[[4]], "VZ", "RMSE", "diff", VZ[[1]], VZ[[2]])
-# XOMdiff.lm.RMSE  <- doLM(XOM[[3]], XOM[[4]], "XOM", "RMSE", "diff", XOM[[1]], XOM[[2]])
-# 
-# print(Sys.time() - startOverall)
-# 
+
+startOverall <- Sys.time() #Start Overall timer
+
+## Predict 'close.diff'
+setup_close.diff()
+
+AAPL.closediff.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
+AAPL.closediff.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ ., "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ ., "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
+
+#Debug only
+# train.df <- AAPL.train
+# pred.df <- AAPL.pred
+# tick <- "AAPL"
+# response = "close.diff"
+# orig.response = "close"
+# formula = close.diff ~ .
+# metric = "Rsquared"
+# xform = "diff"
+# orig.train.df <- AAPL.train.adder
+# orig.pred.df <- AAPL.pred.adder
+
+
+## Predict 'return.percent'
+setup_return.percent()
+
+AAPL.returnpercent.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "Rsquared")
+XOM.returnpercent.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "Rsquared")
+AAPL.returnpercent.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "RMSE")
+XOM.returnpercent.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "RMSE")
+
+## Predict 'volatility.diff'
+setup_volatility.diff()
+
+AAPL.volatilitydiff.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+AAPL.volatilitydiff.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ ., "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+
+print(Sys.time() - startOverall)
+
+## Save models and metrics to external RDS
+for(m in ls(pattern = '\\.knn\\.')){
+    saveRDS(get(m), paste0('Data/ModelRDS/', m, '.RDS'))
+}
+
 # ###########################################
 # ######### Compare Sentiment Models ########
 # ###########################################
