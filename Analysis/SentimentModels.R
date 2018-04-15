@@ -155,6 +155,8 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
         ## Write outputs to external files for later review
         par(mfrow=c(1,1))
         sink(paste0("doRF_", tick, response, "_", metric, ".txt"))
+        warningOut <- file(paste0("Warnings/doRF_", tick, response, "_", metric, "_warnings.txt"), open="wt")
+        sink(warningOut, type = "message")
         pdf(paste0('RFplots_',tick, response, '_', metric, '.pdf'))
 
         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
@@ -243,13 +245,16 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
         plot(feat.imp, main = paste(tick, response, "RF Feature Importance"))
 
         on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
         on.exit(sink(), add = TRUE)
     }, error = function(e){
         on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
         on.exit(sink(), add = TRUE)
         print(paste(tick, response, "RF failed"))
     })
-
 
     return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
 }
@@ -263,19 +268,12 @@ setup_close.diff <- function(){
     assign("AAPL.pred", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.train", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.pred", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
-    #AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-    #AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-    #XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-    #XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
     notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
     assign("AAPL.train.adder", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
     assign("AAPL.pred.adder", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.train.adder", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.pred.adder", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
-    #AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-    #AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-    #XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-    #XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
 }
 setup_close.diff()
 
@@ -304,10 +302,6 @@ setup_return.percent <- function(){
     assign("AAPL.pred", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.train", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.pred", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
-    #AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-    #AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-    #XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-    #XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
 }
 setup_return.percent()
 
@@ -323,19 +317,12 @@ setup_volatility.diff <- function(){
     assign("AAPL.pred", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.train", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.pred", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
-    #AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-    #AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-    #XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-    #XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
+
     notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
     assign("AAPL.train.adder", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
     assign("AAPL.pred.adder", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.train.adder", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
     assign("XOM.pred.adder", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
-    #AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-    #AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-    #XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-    #XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
 }
 setup_volatility.diff()
 
@@ -358,6 +345,8 @@ doXGB <- function(train.df, pred.df, tick, response, metric, xform = "", orig.tr
     tryCatch({
         ## Write outputs to external files for later review
         sink(paste0("doXGB_", tick, response, "_", metric, ".txt"))
+        warningOut <- file(paste0("Warnings/doXGB_", tick, response, "_", metric, "_warnings.txt"), open="wt")
+        sink(warningOut, type = "message")
         pdf(paste0('XGBplots_',tick, response, '_', metric, '.pdf'))
 
         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
@@ -460,15 +449,21 @@ doXGB <- function(train.df, pred.df, tick, response, metric, xform = "", orig.tr
             print(plot(feat.imp, main = paste(tick, "XGBoost Feature Importance")))
 
             on.exit(dev.off())
+            on.exit(sink(type="message"), add = TRUE)
+            on.exit(close(warningOut), add = TRUE)
             on.exit(sink(), add = TRUE)
             return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
         }, error = function(e){
             on.exit(dev.off())
+            on.exit(sink(type="message"), add = TRUE)
+            on.exit(close(warningOut), add = TRUE)
             on.exit(sink(), add = TRUE)
             return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), NA))
         })
     }, error = function(e){
         on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
         on.exit(sink(), add = TRUE)
         print(paste(tick, response, "XGB failed"))
     })
@@ -478,16 +473,6 @@ doXGB <- function(train.df, pred.df, tick, response, metric, xform = "", orig.tr
 startOverall <- Sys.time() #Start Overall timer
 
 ## Predict 'close.diff'
-# notResponse <- c("close", "return.percent", "volatility", "volatility.diff")
-# AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-# AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-# XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-# XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
-# notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
-# AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-# AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-# XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-# XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
 setup_close.diff()
 
 AAPL.closediff.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close.diff", "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
@@ -496,11 +481,6 @@ AAPL.closediff.xgb.RMSE <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close.diff", "R
 XOM.closediff.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "close.diff", "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
 
 ## Predict 'return.percent'
-# notResponse <- c("close", "close.diff", "volatility", "volatility.diff")
-# AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-# AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-# XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-# XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
 setup_return.percent()
 
 AAPL.returnpercent.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "return.percent", "Rsquared")
@@ -520,16 +500,6 @@ XOM.returnpercent.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "return.percent"
 # orig.pred.df <- pred.df
 
 ## Predict 'volatility.diff'
-# notResponse <- c("close", "close.diff", "return.percent", "volatility")
-# AAPL.train <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-# AAPL.pred <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-# XOM.train <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-# XOM.pred <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
-# notResponse <- c("close", "close.diff", "return.percent", "volatility.diff")
-# AAPL.train.adder <- AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)]
-# AAPL.pred.adder <- AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)]
-# XOM.train.adder <- XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)]
-# XOM.pred.adder <- XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)]
 setup_volatility.diff()
 
 AAPL.volatilitydiff.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
@@ -538,6 +508,11 @@ AAPL.volatilitydiff.xgb.RMSE <- doXGB(AAPL.train, AAPL.pred, "AAPL", "volatility
 XOM.volatilitydiff.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "volatility.diff", "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
 
 print(Sys.time() - startOverall)
+
+## Save models and metrics to external RDS
+for(m in ls(pattern = '\\.xgb\\.')){
+    saveRDS(get(m), paste0('Data/ModelRDS/', m, '.RDS'))
+}
 
 
 ####################################################
@@ -548,6 +523,8 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
         ## Write outputs to external files for later review
         par(mfrow=c(1,1))
         sink(paste0("doKNN_", tick, response, "_", metric, ".txt"))
+        warningOut <- file(paste0("Warnings/doKNN_", tick, response, "_", metric, "_warnings.txt"), open="wt")
+        sink(warningOut, type = "message")
         pdf(paste0('KNNplots_',tick, response, '_', metric, '.pdf'))
         
         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
@@ -636,15 +613,19 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
         plot(feat.imp, main = paste(tick, response, "KNN Feature Importance"))
         
         on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
         on.exit(sink(), add = TRUE)
     }, error = function(e){
         on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
         on.exit(sink(), add = TRUE)
         print(paste(tick, response, "RF failed"))
     })
     
     
-    return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+    return(list(knn, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
 }
 
 startOverall <- Sys.time() #Start Overall timer
@@ -693,84 +674,243 @@ for(m in ls(pattern = '\\.knn\\.')){
     saveRDS(get(m), paste0('Data/ModelRDS/', m, '.RDS'))
 }
 
-# ###########################################
-# ######### Compare Sentiment Models ########
-# ###########################################
-# 
-# ## Compare models for each ticker graphically
-# compareMods <- function(pat){
-#     pdf(paste0('Comparison_', pat, '.pdf'))
-#     
-#     ## Get resample results for each model
-#     modList <- ls(pattern = paste0(pat,"."), envir=.GlobalEnv)
-#     if(pat == 'PG') modList <- modList[!grepl('^SPG', modList)]
-#     comp <- lapply(modList, function(x) get(x)[[1]])
-#     names(comp) <- modList
-#     comp <- resamples(comp)
-#     
-#     ## Compare metrics of resample results
-#     trellis.par.set(caretTheme())
-#     print(dotplot(comp, metric = "Rsquared", main = "Sentiment Model Review - R^2"))
-#     print(dotplot(comp, metric = "RMSE", main = "Sentiment Model Review - RMSE"))
-#     print(dotplot(comp, metric = "MAE", main = "Sentiment Model Review - MAE"))
-#     
-#     ## Compare and rank overall metrics
-#     modInfo <- data.frame(model.name = character(), ticker = character(), r2.train = numeric(), r2.pred = numeric(), mse.train = numeric(), mse.pred = numeric(), rmse.train = numeric(), rmse.pred = numeric(), mae.train = numeric(), mae.pred = numeric(), mape.train = numeric(), mape.pred = numeric())
-#     for(m in modList){
-#         modInfo  <-  rbind(modInfo, data.frame(model.name = m, ticker = strsplit(m, '\\.|d')[[1]][1],
-#                                                  r2.train = get(m)[[2]][[1]], r2.pred = get(m)[[2]][[2]],
-#                                                  mse.train = get(m)[[3]][[1]], mse.pred = get(m)[[3]][[2]],
-#                                                  rmse.train = get(m)[[4]][[1]], rmse.pred = get(m)[[4]][[2]],
-#                                                  mae.train = get(m)[[5]][[1]], mae.pred = get(m)[[5]][[2]],
-#                                                  mape.train = get(m)[[6]][[1]], mape.pred = get(m)[[6]][[2]]))
-#     }
-#     
-#     model.name <- modInfo$model.name
-#     ticker <- modInfo$ticker
-#     r2.train <- rank(-modInfo$r2.train, ties.method = "min")
-#     r2.pred <- NA #NA chosen since prediction rSquared values are wonky
-#     mse.train <- rank(modInfo$mse.train, ties.method = "min")
-#     mse.pred <- rank(modInfo$mse.pred, ties.method = "min")
-#     rmse.train <- rank(modInfo$rmse.train, ties.method = "min")
-#     rmse.pred <- rank(modInfo$rmse.pred, ties.method = "min")
-#     mae.train <- rank(modInfo$mae.train, ties.method = "min")
-#     mae.pred <- rank(modInfo$mae.pred, ties.method = "min")
-#     mape.train <- rank(modInfo$mape.train, ties.method = "min")
-#     mape.pred <- rank(modInfo$mape.pred, ties.method = "min")
-#     
-#     ## Make final rankings
-#     modRanks <- data.frame(model.name, ticker, r2.train, r2.pred, mse.train, mse.pred, rmse.train, rmse.pred, mae.train, mae.pred, mape.train, mape.pred)
-#     modRanks$rank.overall <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE), ties.method = "min")
-#     modRanks$rank.train <- rank(rowSums(modRanks[,c(3,5,7,9,11)], na.rm = TRUE), ties.method = "min")
-#     modRanks$rank.pred <- rank(rowSums(modRanks[,c(4,6,8,10,12)], na.rm = TRUE), ties.method = "min")
-#     
-#     
-#     ## Write to global variables
-#     assign(paste0('Comparison.', pat), modInfo, envir=.GlobalEnv)
-#     assign(paste0('Ranks.', pat), modRanks, envir=.GlobalEnv)
-#     
-#     on.exit(dev.off())
-#     
-#     return(comp)
-# }
-# 
-# ## Compare models for each ticker
-# compareMods('AAPL')
-# compareMods('AMZN')
-# compareMods('BA')
-# compareMods('DWDP')
-# compareMods('JNJ')
-# compareMods('JPM')
-# compareMods('NEE')
-# compareMods('PG')
-# compareMods('SPG')
-# compareMods('VZ')
-# compareMods('XOM')
-# 
-# ###########################################
-# ######### Output data to Tableau ##########
-# ###########################################
-# 
+
+####################################################
+###### Generate GAM Spline Regression Model ########
+####################################################
+doGAM <- function(train.df, pred.df, tick, response, formula, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
+    tryCatch({
+        ## Write outputs to external files for later review
+        par(mfrow=c(1,1))
+        sink(paste0("doGAM_", tick, response, "_", metric, ".txt"))
+        warningOut <- file(paste0("Warnings/doGAM_", tick, response, "_", metric, "_warnings.txt"), open="wt")
+        sink(warningOut, type = "message")
+        pdf(paste0('GAMplots_',tick, response, '_', metric, '.pdf'))
+        
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
+        
+        ## Create Random Forest Seeds
+        # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 79) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:78) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[79]] <- sample.int(1000, 1)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
+        tuneGridGAM <- expand.grid(df=c(1:72))
+        #metric <- "Rsquared"
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        gam <- train(formula, data = train.df[,cols], method = "gamSpline", metric = metric, trControl = ts.control, tuneGrid = tuneGridGAM, importance=TRUE)#, preProcess = "scale")
+        print(Sys.time() - start)
+        
+        cat("\ngamSpline Output\n")
+        print(gam)
+        print(plot(gam))
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df[,response], train.df[,response] - predict(gam, train.df[,cols]))
+        r2.pred <- rSquared(pred.df[,response], pred.df[,response] - predict(gam, pred.df[,cols]))
+        mse.train <- mean((train.df[,response] - predict(gam, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df[,response] - predict(gam, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df[,response] - predict(gam, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df[,response] - predict(gam, pred.df[,cols])))
+        mape.train <- MAPE(train.df[,response], predict(gam, train.df[,cols]))
+        mape.pred <- MAPE(pred.df[,response], predict(gam, pred.df[,cols]))
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=train.df[,response], pred=predict(gam, train.df[,cols])))
+        print(p + geom_point() +
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "gamSpline Regression: Training r^2 =", r2.train)))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df[,response], pred=predict(gam, pred.df[,cols])))
+        print(p + geom_point() +
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "gamSpline Regression: Prediction r^2 =", r2.pred)))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df[,orig.response][1], train.df[,response])), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", main = paste0(tick, " gamSpline Performance (", response, "): Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+            text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df[,orig.response][1], predict(gam, train.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), max(c(cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))))), main = paste0(tick, " gamSpline Performance (", response, "): Prediction"))
+            axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+            text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        #else{
+        ## Plot trained and predicted performance
+        plot(as.numeric(c(train.df[,response], pred.df[,response])), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", main = paste0(tick, " gamSpline Performance (", response, "): Training + Prediction"))
+        axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+        text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+        lines(c(predict(gam, train.df[,cols]),predict(gam, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+        abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+        
+        ## Plot just predicted performance
+        plot(as.numeric(pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", ylim = c(min(c(predict(gam, pred.df[,cols]), pred.df[,response])), max(c(predict(gam, pred.df[,cols]), pred.df[,response]))), main = paste0(tick, " gamSpline Performance (", response, "): Prediction"))
+        axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+        text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+        lines(predict(gam, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+        #}
+        
+        tryCatch({
+            ## Get feature importance
+            feat.imp <- varImp(gam)
+            plot(feat.imp, main = paste(tick, response, "gamSpline Feature Importance"))
+            
+            on.exit(dev.off())
+            on.exit(sink(type="message"), add = TRUE)
+            on.exit(close(warningOut), add = TRUE)
+            on.exit(sink(), add = TRUE)
+            return(list(gam, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+        }, error = function(e){
+            on.exit(dev.off())
+            on.exit(sink(type="message"), add = TRUE)
+            on.exit(close(warningOut), add = TRUE)
+            on.exit(sink(), add = TRUE)
+            return(list(gam, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), NA))
+        })
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, response, "gamSpline failed"))
+    })
+}
+
+startOverall <- Sys.time() #Start Overall timer
+
+## Predict 'close.diff'
+setup_close.diff()
+
+AAPL.closediff.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
+AAPL.closediff.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ ., "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ ., "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
+
+#Debug only
+# train.df <- AAPL.train
+# pred.df <- AAPL.pred
+# tick <- "AAPL"
+# response = "close.diff"
+# orig.response = "close"
+# formula = close.diff ~ .
+# metric = "Rsquared"
+# xform = "diff"
+# orig.train.df <- AAPL.train.adder
+# orig.pred.df <- AAPL.pred.adder
+
+## Predict 'return.percent'
+setup_return.percent()
+
+AAPL.returnpercent.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "Rsquared")
+XOM.returnpercent.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "Rsquared")
+AAPL.returnpercent.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "RMSE")
+XOM.returnpercent.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "RMSE")
+
+## Predict 'volatility.diff'
+setup_volatility.diff()
+
+AAPL.volatilitydiff.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+AAPL.volatilitydiff.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ ., "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ ., "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+
+print(Sys.time() - startOverall)
+
+## Save models and metrics to external RDS
+for(m in ls(pattern = '\\.gam\\.')){
+    saveRDS(get(m), paste0('Data/ModelRDS/', m, '.RDS'))
+}
+
+###########################################
+######### Compare Sentiment Models ########
+###########################################
+
+## Compare models for each ticker graphically
+compareMods <- function(pat, response){
+    pdf(paste0('Comparison_', pat, '.pdf'))
+
+    ## Get resample results for each model
+    modList <- ls(pattern = paste0("^", pat, ".", response), envir=.GlobalEnv)
+    if(pat == 'PG') modList <- modList[!grepl('^SPG', modList)]
+    comp <- lapply(modList, function(x) get(x)[[1]])
+    names(comp) <- modList
+    comp <- resamples(comp)
+
+    ## Compare metrics of resample results
+    trellis.par.set(caretTheme())
+    print(dotplot(comp, metric = "Rsquared", main = paste0("Sentiment Model Review (", pat, " ", response, ") - R^2")))
+    print(dotplot(comp, metric = "RMSE", main = paste0("Sentiment Model Review (", pat, " ", response, ") - RMSE")))
+    print(dotplot(comp, metric = "MAE", main = paste0("Sentiment Model Review (", pat, " ", response, ") - MAE")))
+
+    ## Compare and rank overall metrics
+    modInfo <- data.frame(model.name = character(), ticker = character(), r2.train = numeric(), r2.pred = numeric(), mse.train = numeric(), mse.pred = numeric(), rmse.train = numeric(), rmse.pred = numeric(), mae.train = numeric(), mae.pred = numeric(), mape.train = numeric(), mape.pred = numeric())
+    for(m in modList){
+        modInfo  <-  rbind(modInfo, data.frame(model.name = m, ticker = strsplit(m, '\\.|d')[[1]][1],
+                                                 r2.train = get(m)[[2]][[1]], r2.pred = get(m)[[2]][[2]],
+                                                 mse.train = get(m)[[3]][[1]], mse.pred = get(m)[[3]][[2]],
+                                                 rmse.train = get(m)[[4]][[1]], rmse.pred = get(m)[[4]][[2]],
+                                                 mae.train = get(m)[[5]][[1]], mae.pred = get(m)[[5]][[2]],
+                                                 mape.train = get(m)[[6]][[1]], mape.pred = get(m)[[6]][[2]]))
+    }
+
+    model.name <- modInfo$model.name
+    ticker <- modInfo$ticker
+    r2.train <- rank(-modInfo$r2.train, ties.method = "min")
+    r2.pred <- NA #NA chosen since prediction rSquared values are wonky
+    mse.train <- rank(modInfo$mse.train, ties.method = "min")
+    mse.pred <- rank(modInfo$mse.pred, ties.method = "min")
+    rmse.train <- rank(modInfo$rmse.train, ties.method = "min")
+    rmse.pred <- rank(modInfo$rmse.pred, ties.method = "min")
+    mae.train <- rank(modInfo$mae.train, ties.method = "min")
+    mae.pred <- rank(modInfo$mae.pred, ties.method = "min")
+    mape.train <- rank(modInfo$mape.train, ties.method = "min")
+    mape.pred <- rank(modInfo$mape.pred, ties.method = "min")
+
+    ## Make final rankings
+    modRanks <- data.frame(model.name, ticker, r2.train, r2.pred, mse.train, mse.pred, rmse.train, rmse.pred, mae.train, mae.pred, mape.train, mape.pred)
+    modRanks$rank.overall <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE), ties.method = "min")
+    modRanks$rank.train <- rank(rowSums(modRanks[,c(3,5,7,9,11)], na.rm = TRUE), ties.method = "min")
+    modRanks$rank.pred <- rank(rowSums(modRanks[,c(4,6,8,10,12)], na.rm = TRUE), ties.method = "min")
+
+
+    ## Write to global variables
+    assign(paste0('Comparison.', pat, '.', response), modInfo, envir=.GlobalEnv)
+    assign(paste0('Ranks.', pat, '.', response), modRanks, envir=.GlobalEnv)
+
+    on.exit(dev.off())
+
+    return(comp)
+}
+
+## Compare models for each ticker
+compareMods('AAPL', 'closediff')
+compareMods('AAPL', 'returnpercent')
+compareMods('AAPL', 'volatilitydiff')
+compareMods('XOM', 'closediff')
+compareMods('XOM', 'returnpercent')
+compareMods('XOM', 'volatilitydiff')
+
+###########################################
+######### Output data to Tableau ##########
+###########################################
+
 # ## Output data for visualization in Tableau
 # allTickDF <- rbind(AAPL[[1]], AAPL[[2]]) #First, output non-diffed price and scores
 # allTickDF$highDiff <- c(AAPL[[3]][[ncol(AAPL[[3]])]], AAPL[[4]][[ncol(AAPL[[4]])]])
