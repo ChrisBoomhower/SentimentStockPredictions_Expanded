@@ -844,7 +844,7 @@ for(m in ls(pattern = '\\.gam\\.')){
 
 ## Compare models for each ticker graphically
 compareMods <- function(pat, response){
-    pdf(paste0('Comparison_', pat, '.pdf'))
+    pdf(paste0('Comparison_', pat, response, '.pdf'))
 
     ## Get resample results for each model
     modList <- ls(pattern = paste0("^", pat, ".", response), envir=.GlobalEnv)
@@ -911,64 +911,43 @@ compareMods('XOM', 'volatilitydiff')
 ######### Output data to Tableau ##########
 ###########################################
 
-# ## Output data for visualization in Tableau
-# allTickDF <- rbind(AAPL[[1]], AAPL[[2]]) #First, output non-diffed price and scores
-# allTickDF$highDiff <- c(AAPL[[3]][[ncol(AAPL[[3]])]], AAPL[[4]][[ncol(AAPL[[4]])]])
-# allTickDF$ticker <- 'AAPL'
-# ticks10 <- c('AMZN', 'BA', 'DWDP', 'JNJ', 'JPM', 'NEE', 'PG', 'SPG', 'VZ', 'XOM')
-# for(t in ticks10){
-#     temp <- rbind(get(t)[[1]], get(t)[[2]])
-#     temp$highDiff <- c(get(t)[[3]][[ncol(get(t)[[3]])]], get(t)[[4]][[ncol(get(t)[[4]])]])
-#     temp$ticker <- t
-#     allTickDF <- rbind(allTickDF, temp)
-# }
-# rm(t, temp, ticks10)
-# write.csv(allTickDF, 'Data/Tableau/allTickDF.csv', row.names = FALSE)
-# 
-# ## Output feature importance where available
-# featureRank <- data.frame(model = character(), ticker = character(), feature = character(), importance = numeric())
-# decTrees <- ls(pattern = '.xgb.|.rf.')
-# for (m in decTrees){
-#     if(!is.na(get(m)[length(get(m))])){
-#         temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
-#                            feature = row.names(get(m)[[length(get(m))]][[1]]),
-#                            importance = get(m)[[length(get(m))]][[1]])
-#         featureRank <- rbind(featureRank, temp)
-#     }
-# }
-# rm(m, temp, decTrees)
-# write.csv(featureRank, 'Data/Tableau/featureRank.csv', row.names = FALSE)
-# 
-# ## Output coefficients and confidence intervals where available
-# coeffConfs <- data.frame(model = character(), ticker = character(), variable = character(),
-#                           coeff = numeric(), confInt.Lower = numeric(), confInt.Upper = numeric())
-# linMods <- ls(pattern = '.lm.')
-# for (m in linMods){
-#     if(!is.na(get(m)[length(get(m))])){
-#         temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
-#                            variable = names(get(m)[[length(get(m))-1]]),
-#                            coeff = get(m)[[length(get(m))-1]],
-#                            confInt.Lower = get(m)[[length(get(m))]][,1],
-#                            confInt.Upper = get(m)[[length(get(m))]][,2])
-#         coeffConfs <- rbind(coeffConfs, temp)
-#     }
-# }
-# rm(m, temp, linMods)
-# write.csv(coeffConfs, 'Data/Tableau/coeffConfs.csv', row.names = FALSE)
-# 
-# ## Output metric and ranking tables
-# comps <- ls(pattern = '^Comparison\\.')
-# modelMetrics <- get(comps[1])
-# for(c in comps[-1]){
-#     modelMetrics <- rbind(modelMetrics, get(c))
-# }
-# rm(comps, c)
-# write.csv(modelMetrics, 'Data/Tableau/modelMetrics.csv', row.names = FALSE)
-# 
-# rankings <- ls(pattern = '^Ranks\\.')
-# modelRanks <- get(rankings[1])
-# for(r in rankings[-1]){
-#     modelRanks <- rbind(modelRanks, get(r))
-# }
-# rm(rankings, r)
-# write.csv(modelRanks, 'Data/Tableau/modelRanks.csv', row.names = FALSE)
+## Output data for visualization in Tableau
+allTickDF <- rbind(AAPL[[1]], AAPL[[2]]) #First, output non-diffed price and scores
+allTickDF$ticker <- 'AAPL'
+temp <- rbind(XOM[[1]], XOM[[2]])
+temp$ticker <- "XOM"
+allTickDF <- rbind(allTickDF, temp)
+rm(temp)
+
+write.csv(allTickDF, 'Data/Tableau/allTickDF.csv', row.names = FALSE)
+
+## Output feature importance where available
+featureRank <- data.frame(model = character(), ticker = character(), feature = character(), importance = numeric())
+hasFeatRank <- ls(pattern = '.xgb.|.rf.|.knn.|.gam.')
+for (m in hasFeatRank){
+    if(!is.na(get(m)[length(get(m))])){
+        temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
+                           feature = row.names(get(m)[[length(get(m))]][[1]]),
+                           importance = get(m)[[length(get(m))]][[1]])
+        featureRank <- rbind(featureRank, temp)
+    }
+}
+rm(m, temp, hasFeatRank)
+write.csv(featureRank, 'Data/Tableau/featureRank.csv', row.names = FALSE)
+
+## Output metric and ranking tables
+comps <- ls(pattern = '^Comparison\\.')
+modelMetrics <- get(comps[1])
+for(c in comps[-1]){
+    modelMetrics <- rbind(modelMetrics, get(c))
+}
+rm(comps, c)
+write.csv(modelMetrics, 'Data/Tableau/modelMetrics.csv', row.names = FALSE)
+
+rankings <- ls(pattern = '^Ranks\\.')
+modelRanks <- get(rankings[1])
+for(r in rankings[-1]){
+    modelRanks <- rbind(modelRanks, get(r))
+}
+rm(rankings, r)
+write.csv(modelRanks, 'Data/Tableau/modelRanks.csv', row.names = FALSE)
