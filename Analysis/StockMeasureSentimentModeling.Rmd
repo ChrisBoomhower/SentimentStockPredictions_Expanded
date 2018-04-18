@@ -1,0 +1,1487 @@
+---
+title: "Stock Measure Sentiment-Based Modeling"
+output:
+  html_notebook: default
+  html_document: default
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+## Sentiment-Based Stock Modeling - By Chris Boomhower
+As an extension of the modeling performed during Project 1, this notebook breaks down my sentiment-based approach to modeling and predicting not only hourly stock price, but also hourly returns and volatility. As before, this approach involved querying social media and news outlet data to obtain publicly shared messages for each stock ticker, consolidating and generating sentiment scores for each of these messages, and then using the newly generated sentiment scores to model stock performance by the hour. Unlike before, however, only two stocks were modeled (AAPL and XOM) instead of an entire portfolio of eleven stocks. This project's approach is still comprised of three primary components (and three subcomponents), but improvements to my previous sentiment scoring methodology and additional model type implementations were utilized, as will be described herein:
+
+1. Social media and news article querying
+    a. StockTwits message querying
+    b. Twitter message querying
+    c. Yahoo Finance news article headline querying
+2. Message processing & sentiment score development
+3. Sentiment-based model development
+
+**It is important to note that because historical StockTwits, Twitter, and Yahoo Finance news article data are not available without *(significant)* pay, data collection and modeling were performed only for the period of this project. Due to this constraint, sentiment and stock data were trained/predicted only between 2/27/18 - 4/13-18.**
+
+### StockTwits, Twitter, and Yahoo Finance Querying
+#### StockTwits Data Gathering
+###### *(The following data gathering descriptions remain unchanged from Project 1)*
+The first of the social media outlets was Stocktwits. The following code chunk was written as a standalone R script that was scheduled via Windows Task Scheduler to run every 15 minutes, 24/7, throughout the duration of this project. It uses the StockTwits API which supports JSON format querying for any ticker. I built my URL JSON calls around the StockTwits Developer API documentation, found at https://api.stocktwits.com/developers/docs/start, and the desired ticker name.
+
+Fifteen minute intervals were selected using Task Scheduler to maximize the number of messages received (each query is limited to 30 messages maximum) without violating StockTwits' API rate limits. Each time this code is run, a dataframe containing the messages for the desired ticker as well as other metadata such as the number of likes, reshares, etc., are saved to an RDS file in the respective ticker's designated StockTwits data folder in my project directory. These files are simply stored for later processing.
+
+```{r}
+library(jsonlite)
+require(plyr)
+
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/StockTwits")
+
+## Get system time for script run
+date<-Sys.time()
+date<-as.character(date)
+date <- gsub(":","_", date)
+date
+
+## Function to obtain and write twit data to dataframe class
+getTwit <- function(symb){
+    ## Get twits
+    recentTwits <- stream_in(url(paste0("https://api.stocktwits.com/api/2/streams/symbol/", symb, ".json")))
+    
+    ## Save twits
+    setwd(symb)
+    name<-paste0(symb,"_",date,".RDS")
+    saveRDS(as.data.frame(recentTwits$messages), file = name)
+    setwd("..")
+    
+    return(paste(symb, "data saved"))
+}
+
+## Get twit data for portfolio tickers based on folder listings
+for(s in list.files(pattern = '[^getStockTwits.R|getStockTwits.bat|getStockTwits.Rout]')){
+    try(print(getTwit(s)))
+}
+```
+
+#### Twitter Data Gathering
+###### *(The following data gathering descriptions remain unchanged from Project 1)*
+The second social media outlet queried was Twitter. The following code was also written in a standalone R file and scheduled to run throughout the duration of this project. Unlike StockTwits, however, Twitter data was scheduled to pull every 30 minutes, 24/7, due to stricter rate limits. When querying each *#ticker* within a 15 minute window (each ticker requires its own query and 1000 messages were requested with each query), rate limits were incurred. So 30 minute intervals were chosen as the recurrent interval to pull recent/popular tweet data while avoiding rate limit issues. As with StockTwits data, Twitter dataframes containing each message and associated metadata such as the number of likes, re-tweets, etc., were saved to RDS files in their associated Twitter/ticker folder for later processing.
+
+It should be noted that unlike StockTwits, Twitter API usage required both registration using OAuth authentication and a valid Twitter account to track usage and enforce rate limits (See https://developer.twitter.com/en/docs/basics/authentication/overview/oauth for further details). All API keys and tokens were therefore referenced from within a local text file.
+
+```{r}
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/TwitterData")
+
+library(twitteR)
+library(httr)
+library(taskscheduleR)
+
+## Get system time for script run
+date<-Sys.time()
+date<-as.character(date)
+date <- gsub(":","_", date)
+date
+
+## Get API OAuth credentials and authorize account
+api_key <- readLines("C:/Users/Owner/OneDrive for Business/Semester_6/Special Topics in Data Science/Project 1/OAuth/API_KEY.txt")
+api_secret <- readLines("C:/Users/Owner/OneDrive for Business/Semester_6/Special Topics in Data Science/Project 1/OAuth/API_SECRET.txt")
+access_token <- readLines("C:/Users/Owner/OneDrive for Business/Semester_6/Special Topics in Data Science/Project 1/OAuth/ACCESS_TOKEN.txt")
+access_token_secret <- readLines("C:/Users/Owner/OneDrive for Business/Semester_6/Special Topics in Data Science/Project 1/OAuth/ACCESS_TOKEN_SECRET.txt")
+
+setup_twitter_oauth(api_key, api_secret, access_token=access_token, access_secret=access_token_secret)
+
+## Function to obtain and write twit data to dataframe class
+getTweet <- function(symb){
+    ## Get tweets
+    recentTweets <- searchTwitter(paste0("#",symb), n=1000, lang = "en")
+    recentTweets.df <- twListToDF(recentTweets)
+    
+    ## Save twits
+    setwd(symb)
+    name<-paste0(symb,"_",date,".RDS")
+    saveRDS(recentTweets.df, file =name)
+    setwd("..")
+    
+    return(paste(symb, "data saved"))
+}
+
+## Get tweet data for portfolio tickers based on folder listings
+for(s in list.files(pattern = '[^getTweets.R|getTweets.bat|getTweets.Rout]')){
+    try(print(getTweet(s)))
+}
+```
+
+#### Yahoo Finance News Data Gathering
+###### *(The following data gathering descriptions remain unchanged from Project 1)*
+The final media outlet used to build my sentiment dataset was Yahoo Finance. Similar to StockTwits and Twitter, the following code chunk was written as a standalone R file and was scheduled to run periodically throughout the duration of this project. I chose to pull Yahoo Finance news headline data four times per day (12am, 8am, 12pm, and 4pm) since message generation is significantly slower than Twitter and StockTwits. The *tm.plugin.webmining* R library was used to query the Yahoo Finance data so no direct API usage was implemented (See https://cran.r-project.org/web/packages/tm.plugin.webmining/vignettes/ShortIntro.pdf for reference). After extracting pertinent article timestamp, headline, origin, and ID data, data were again stored in RDS files for later processing.
+
+```{r}
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/YahooFinance")
+
+library(tm.plugin.webmining)
+library(tm)
+
+## Get system time for script run
+date<-Sys.time()
+date<-as.character(date)
+date <- gsub(":","_", date)
+date
+
+## Function to extract meta elements to vector
+enum <- function(data.list, data.vec){
+    en = 1
+    for(i in data.list){
+        data.vec[en] <- i
+        en = en + 1
+    }
+    
+    return(data.vec)
+}
+
+## Function to get YahooFinance news articles
+getStockNews <- function(symb){
+    ## Get news
+    yahoofinance <- WebCorpus(YahooFinanceSource(symb))
+    
+    ## Extract timestamps
+    dt.list <- lapply(yahoofinance, meta, "datetimestamp")
+    dt.vec <- .POSIXct(character(length(dt.list)))
+    dt.vec <- enum(dt.list, dt.vec)
+    attributes(dt.vec)$tzone <- "America/New_York"
+    
+    ## Extract descriptions
+    des.list <- lapply(yahoofinance, meta, "description")
+    des.vec <- character(length(des.list))
+    des.vec <- enum(des.list, des.vec)
+    
+    ## Extract origin
+    orig.list <- lapply(yahoofinance, meta, "origin")
+    orig.vec <- character(length(orig.list))
+    orig.vec <- enum(orig.list, orig.vec)
+    
+    ## Extract id
+    id.list <- lapply(yahoofinance, meta, "origin")
+    id.vec <- character(length(id.list))
+    id.vec <- enum(id.list, id.vec)
+    
+    ## combine article data into dataframe
+    news <- data.frame(timestamp = dt.vec, description = des.vec,
+                       url = orig.vec, articleID = id.vec, stringsAsFactors = FALSE)
+    
+    ## Save news dataframe
+    setwd(symb)
+    name<-paste0(symb,"_",date,".RDS")
+    saveRDS(news, file =name)
+    setwd("..")
+    
+    return(paste(symb, "data saved"))
+}
+
+## Get YahooFinance data for portfolio tickers based on folder listings
+for(s in list.files(pattern = '[^getNews.R|getNews.bat|getNews.Rout]')){
+    try(print(getStockNews(s)))
+}
+```
+
+### Message Processing & Sentiment Score Development
+After collecting StockTwits, Twitter, and Yahoo Finance data for a couple months, I next gathered together my various RDS files for cleanup, consolidation, and sentiment score generation. While basic means of sentiment score generation were implemented during Project 1, I chose to implement more advanced, and more accurate, sentiment scoring methods during Project 2. These methods will be described further in the *Assign Sentiment Scores* section below.
+
+The code chunks that follow in this section were originally run within a standalone R file. Though only two stocks were analyzed in this project, I still wanted my code to be scalable such that other stocks could be easily modeled in the future. Therefore, loops, lists, dynamic object *get* and *assign*, and custom functions were used heavily throughout the remainder of my code.
+
+In addition to the packages used during cleanup, consolidation, and sentiment scoring in Project 1, the *sentimentr* and *textclean* packages were also loaded during Project 2.
+
+```{r}
+require(plyr)
+require(jsonlite)
+require(stringr)
+require(dplyr)
+require(DataCombine)
+require(lubridate)
+require(sentimentr)
+require(textclean)
+```
+
+#### Data Consolidation
+##### StockTwits
+###### *(The following data consolidation descriptions remain unchanged from Project 1)*
+I first consolidated StockTwits data by generating a list of StockTwits objects (for only AAPL and XOM in this case) and a list of column names I'd like to keep. I then used a for-loop to enter each StockTwits/ticker directory, combine each RDS file's dataframe contents subset on desired columns only, remove duplicates, and convert message creation timestamps to EST time zone to match the stock market trading schedule. Since messages show up in the API feed whenever an update associated with their ID occurs and the same exact message and attribute values can show up between different query times even if no attribute updates occur, I had to decide how to treat duplicate messages. To do this, I chose to keep only the version of duplicate messages (sharing same message ID) with the highest number of total likes as the number of likes would be considered for evaluation during sentiment score generation in later steps (though the number of likes were ultimately not included in Project 2 for the same reasons they were not included in final score generation during Project 1). Since the data received from StockTwits contained *NA* values when messages have no likes, these *NA's* were replaced with zeroes.
+
+```{r}
+## Consolidate StockTwits ticker symbol data into single dataframes with duplicates dropped
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/StockTwits")
+ST.tickers <- c("AAPL", "XOM")
+
+cols.u <- c("id", "body", "created_at", "symbols", "links", "user.id", "likes.total")
+
+start <- Sys.time() #Start timer
+for(s in ST.tickers){
+    setwd(s)
+
+    files <- list.files(pattern = '\\.RDS$')
+    dat_list <- lapply(files, readRDS)
+    dat_list <- lapply(dat_list, flatten) #Need to flatten dataframes since dfs from JSON contain nested dfs
+    df <- ldply(dat_list, data.frame) #Combine list dataframes into single dataframe
+
+    ## Remove duplicates; of duplicates, keep only record with highest likes.total
+    temp <- df[!duplicated(df[,cols.u]),]
+    temp$likes.total <- ifelse(is.na(temp$likes.total), 0, temp$likes.total) #Fill NAs with 0
+    df <- temp %>% group_by(id, body, created_at, user.id) %>% top_n(1, likes.total) #Inspired by https://stackoverflow.com/questions/24558328/how-to-select-the-row-with-the-maximum-value-in-each-group
+
+    ## Convert creation time to date format and convert UTC time to EST
+    df$created_at <- as.POSIXct(strptime(df$created_at,"%FT%H:%M:%SZ", tz = "UTC"))
+    df$created_at <- format(df$created_at, tz="EST")
+    
+    assign(paste0(s,".ST"), df)
+
+    setwd('..')
+}
+rm(df)
+rm(temp)
+rm(dat_list)
+print(Sys.time() - start)
+```
+
+##### Twitter
+###### *(The following data consolidation descriptions remain unchanged from Project 1)*
+The same process as StockTwits was undergone for Twitter data consolidation also. Again, duplicate messages with no attribute value updates often occur between queries made at different times and the same message ID can often reappear because an associated attribute is updated (such as the number of likes for the message ID). Duplicates are therefore treated in the same fashion as StockTwits.
+
+```{r}
+## Consolidate Twitter ticker symbol data into single dataframes with duplicates dropped
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/TwitterData")
+T.tickers <- c("AAPL", "XOM")
+
+cols.u <- c("id", "text", "created", "screenName", "favoriteCount")
+
+start <- Sys.time() #Start timer
+for(s in T.tickers){
+    setwd(s)
+
+    files <- list.files(pattern = '\\.RDS$')
+    dat_list <- lapply(files, readRDS)
+    df <- ldply(dat_list, data.frame)
+
+    ## Remove duplicates; of duplicates, keep only record with highest favoriteCount
+    temp <- df[!duplicated(df[,cols.u]),]
+    df <- temp %>% group_by(id, text, created, screenName) %>% top_n(1, favoriteCount) #Inspired by https://stackoverflow.com/questions/24558328/how-to-select-the-row-with-the-maximum-value-in-each-group
+
+    ## Convert UTC time to EST
+    df$created <- format(df$created, tz="EST")
+    
+    assign(paste0(s,".T"), df)
+
+    setwd('..')
+}
+rm(df)
+rm(temp)
+rm(dat_list)
+print(Sys.time() - start)
+```
+
+##### Yahoo Finance
+###### *(The following data consolidation descriptions remain unchanged from Project 1)*
+The same consolidation process as StockTwits and Twitter was performed for Yahoo Finance data as well, the main difference being only that messages have no *like* attribute, so duplicates are simply dropped without needing to worry about non-duplicate attribute values being dropped as well.
+
+```{r}
+## Consolidate YahooFinance ticker symbol data into single dataframes with duplicates dropped
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/YahooFinance")
+YF.tickers <- c("AAPL", "XOM")
+
+start <- Sys.time() #Start timer
+for(s in YF.tickers){
+    setwd(s)
+
+    files <- list.files(pattern = '\\.RDS$')
+    dat_list <- lapply(files, readRDS)
+    df <- ldply(dat_list, data.frame)
+
+    df <- df[!duplicated(df$description),] #Drop duplicates
+    
+    ## Ensure EST timestamps (EST appears to be default but just want to make sure)
+    df$created <- format(df$timestamp, tz="EST")
+    
+    assign(paste0(s,".YF"), df) #Assign to variable named after ticker symbol
+
+    setwd('..')
+}
+rm(df)
+rm(dat_list)
+print(Sys.time() - start)
+```
+
+#### Assign Sentiment Scores
+During Project 1, sentiment scores had been generated by simply matching individual words in each StockTwits, Twitter, or Yahoo Finance message/description against words present in good/bad dictionary lists (Published by Minqing Hu and Bing Liu - *"Mining and Summarizing Customer Reviews"* and *"Opinion Observer: Analyzing and Comparing Opinions on the Web."*) The count of good and bad words within each social media message or news description were summed to calculate that particular message or description's sentiment. These sentiments had then been summed by the date and hour. However, this very basic approach to sentiment scoring not only resulted in sparse sentiemnt score matrices in some cases but also failed to truly reflect message sentiment for many messages.
+
+An example of the weaknesses present in the previous approach is indicated by the following message: "I'm not happy with AAPL." Project 1's scoring methodology would have given this message a positive sentiment value of +1 since the word "happy" is present and no other words in the message carry innate sentiment weights of their own. However, this message clearly portrays negative feelings via the "not" negator. Furthermore, all good words were given equal sentiment weights of +1 and all bad words equal weights of -1. This meant that words such as "content" and "elated" both carried the same weight while one might argue "elated" should be given a higher score than "content." These deficiencies drew my concern as I pondered Project 1 outcomes.
+
+So, in attempt to generate more accurate scores during Project 2, I chose to implement more sophisticated approaches to natural language processing by also accounting for valence shifters such as negators, adversative conjunctions, amplifiers, and de-amplifiers. To do this, I used the *sentimentr* package which does a superb job at accounting for these types of modifiers. The *sentimentr* package is written and maintained by Tyler Rinker and is well documented at https://github.com/trinker/sentimentr. My process of prepping message and description data for scoring with the *sentimentr* package will be described further below.
+
+Before generating sentiment scores, however, I first performed additional text cleanup (which wasn't necessary during Project 1 since scores were assigned soley based on individual words rather than phrases). I first began this process by modifying the *lexicon::hash_sentiment_jockers_rinker* primary sentiment dictionary by replacing "bullish," "bull", and "bearish" scores of -0.8, -1, and -1 respectively with +1, +1, and -1 to fit the context of stock market terminology sentiment. I also added the "bear" term with a score of -1 as "bear" did not have an associated score by default. After creating the modified primary sentiment key, I also modified the *lexicon::hash_emoticons* dictionary since I would be converting emoticons to their word equivalents and needed to drop the "QQ" (crying eyes) emoticon. Removal of this emoticon was important so as to not be confused with the PowerShares QQQ Trust ticker symbol which appears in many messages present in my dataset.
+
+```{r}
+## Modify 'bullish'/'bearish' sentiment
+modKey <- update_key(lexicon::hash_sentiment_jockers_rinker,
+                     drop = c("bullish", "bull", "bearish"),
+                     x = data.frame(x = c("bullish", "bull", "bearish", "bear"), y = c(1,1,-1,-1)))
+
+## Drop 'crying' emoticon since interferes with commonly posted #QQQ ticker
+modEmo <- update_key(lexicon::hash_emoticons, drop = "QQ")
+```
+
+With these minor modifications complete, I then proceeded to prepare StockTwits, Twitter, and Yahoo Finance message contents for scoring, to generate sentiment scores, to account for date/hour combinations during which no messages were posted, and to lag score values. These steps were all performed within the *combineSent* function below.
+
+In the case of StockTwits, the "bullish" and "bearish" tags associated with messages were added to the main message contents for sentiment scoring. For all three media types, timestamps were again ensured to match EST time zone and date and hour attributes were derived. It should be noted that custom text cleanup routines were next applied to all three media types based on commonalities unique to each type. After this was done, all messages were split by sentences since the *sentimentr* package generates base scores at the sentence level. With sentences defined for each message, average sentiment was then calculated for each date/hour combination.
+
+Finally, as was done in Project 1, I created 72 lagged versions of each score type. This means that instead of having a single StockTwits score, single Twitter score, and single Yahoo Finance score, I now have three full days' worth of historical data for each sentiment source by lagging the scores by one hour 72 times. Since I am interested in predicting stock measures based on historical sentiment data, I felt it appropriate to remove the current date/hour's score and previous six lags. By doing so, I expect to be able to make predictions for the entire length of a seven-hour trading day at opening on that day since predictions for a given hour are based on sentimental scores seven hours prior. After creating lagged scores and removing the most recent seven hours of sentiment data, each stock price will now have 198 score column predictors (66 per sentiment source type).
+
+```{r}
+## Function to combine sources and pad missing timestamps when no messages were posted
+combineSent <- function(ST.t, Tw.t, YF.t){
+	###### StockTwits ######
+    ## Prep StockTwits for hourly predictions
+    ST.small <- as.data.frame(get(ST.t)[,c("created_at", "body")])
+    colnames(ST.small) <- c("timestamp", "message")#"ST.score")
+    ST.small$message <- paste0(ST.small$message, " ; ", get(ST.t)[["entities.sentiment.basic"]]) #Add ST 'bullish'/'bearish' tags
+    ST.small$timestamp <- as.character(format(ST.small$timestamp, tz="EST"))
+    ST.small$timestamp <- ymd_hms(ST.small$timestamp, tz="EST")
+    ST.small$date <- date(ST.small$timestamp) #date/hour extraction inspired by https://stackoverflow.com/questions/10705328/extract-hours-and-seconds-from-posixct-for-plotting-purposes-in-r
+    ST.small$hour <- hour(ST.small$timestamp)
+	
+    ## Cleanup StockTwits messages
+    ST.small$message <- gsub("http[^[:blank:]]+", "", ST.small$message)
+    ST.small$message = gsub("@[A-Za-z0-9_:]+", "", ST.small$message)
+    ST.small$message <- replace_emoticon(ST.small$message, emoticon_dt = modEmo)
+    ST.small$message <- replace_html(ST.small$message)
+    ST.small$message <- gsub("&#39;", "'", ST.small$message)
+    ST.small$message = gsub('\\s;\\sNA+$', "", ST.small$message) #Remove NA's introduced when no 'bullish'/'bearish' tage exists
+    ST.small$message = gsub('^[:space:]+|[:space:]+$', "", ST.small$message)
+    ST.small$message = gsub("\\$", "#", ST.small$message) #Use for StockTwits
+	
+    ## Generate StockTwits sentiment
+    mytext <- get_sentences(ST.small$message)
+    sent <- with(ST.small,
+                 sentiment_by(mytext,
+                              list(date, hour),
+                              polarity_dt = modKey)) #Specify modified polarity key
+    ST.small <- sent[, c("date", "hour", "ave_sentiment")]
+    colnames(ST.small) <- c("date", "hour", "ST.score")
+	
+    ## Add placeholders for hours during which no messages were posted
+    ST.small <- ST.small[with(ST.small, order(date, hour)),]
+    fill <- seq(ymd_h(paste(as.character(format(ST.small[1, "date"], tz="EST")), ST.small[1, "hour"]), tz = "EST"),
+                ymd_h(paste(as.character(format(ST.small[nrow(ST.small)-1, "date"], tz="EST")), ST.small[nrow(ST.small)-1, "hour"]),tz = "EST"),
+                by="hour")
+    ST.small <- full_join(ST.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+    ST.small <- ST.small[with(ST.small, order(date, hour)),]
+	
+    ## Lag scores
+    for(i in seq(1,72)) ST.small <- slide(ST.small, Var = "ST.score", slideBy = -i)
+    ST.small <- tail(ST.small, -72) #Drop rows with lagged NA values
+    ST.small <- ST.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+    
+	
+	###### Twitter ######
+    ## Prep Twitter for hourly predictions
+    T.small <- as.data.frame(get(Tw.t)[,c("created", "text")])
+    colnames(T.small) <- c("timestamp", "message")
+    T.small$timestamp <- as.character(format(T.small$timestamp, tz="EST"))
+    T.small$timestamp <- ymd_hms(T.small$timestamp, tz="EST")
+    T.small$date <- date(T.small$timestamp)
+    T.small$hour <- hour(T.small$timestamp)
+	
+    ## Cleanup Twitter messages
+    T.small$message <- gsub("http[^[:blank:]]+", "", T.small$message)
+    T.small$message = gsub("@[A-Za-z0-9_:]+", "", T.small$message)
+    T.small$message = gsub("^RT","",T.small$message) #Use for Twitter
+    T.small$message <- replace_emoticon(T.small$message, emoticon_dt = modEmo)
+    T.small$message <- replace_html(T.small$message)
+    T.small$message <- gsub("&#39;", "'", T.small$message)
+    T.small$message = gsub('^[:space:]+|[:space:]+$', "", T.small$message)
+	
+    ## Generate Twitter sentiment
+    mytext <- get_sentences(T.small$message)
+    sent <- with(T.small,
+                 sentiment_by(mytext,
+                              list(date, hour),
+                              polarity_dt = modKey)) #Specify modified polarity key
+    T.small <- sent[, c("date", "hour", "ave_sentiment")]
+    colnames(T.small) <- c("date", "hour", "T.score")
+	
+    ## Add placeholders for hours during which no messages were posted
+    T.small <- T.small[with(T.small, order(date, hour)),]
+    fill <- seq(ymd_h(paste(as.character(format(T.small[1, "date"], tz="EST")), T.small[1, "hour"]), tz = "EST"),
+                ymd_h(paste(as.character(format(T.small[nrow(T.small)-1, "date"], tz="EST")), T.small[nrow(T.small)-1, "hour"]),tz = "EST"),
+                by="hour")
+    T.small <- full_join(T.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+    T.small <- T.small[with(T.small, order(date, hour)),]
+	
+    ## Lag scores
+    for(i in seq(1,72)) T.small <- slide(T.small, Var = "T.score", slideBy = -i)
+    T.small <- tail(T.small, -72) #Drop rows with lagged NA values
+    T.small <- T.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+    
+    
+	###### Yahoo Finance ######
+    ## Prep Yahoo Finance for hourly predictions
+    YF.small <- as.data.frame(get(YF.t)[,c("timestamp", "description")])
+    colnames(YF.small) <- c("timestamp", "message")
+    YF.small$timestamp <- as.character(format(YF.small$timestamp, tz="EST"))
+    YF.small$timestamp <- ymd_hms(YF.small$timestamp, tz="EST")
+    YF.small$date <- date(YF.small$timestamp)
+    YF.small$hour <- hour(YF.small$timestamp)
+	
+    ## Cleanup Yahoo Finance messages
+    YF.small$message <- gsub("http[^[:blank:]]+", "", YF.small$message)
+    YF.small$message = gsub("@", "", YF.small$message)
+    YF.small$message <- replace_html(YF.small$message)
+    YF.small$message <- gsub("&#39;", "'", YF.small$message)
+	
+    ## Generate Yahoo Finance sentiment
+    mytext <- get_sentences(YF.small$message)
+    sent <- with(YF.small,
+                 sentiment_by(mytext,
+                              list(date, hour),
+                              polarity_dt = modKey)) #Specify modified polarity key
+    YF.small <- sent[, c("date", "hour", "ave_sentiment")]
+    colnames(YF.small) <- c("date", "hour", "YF.score")
+	
+    ## Add placeholders for hours during which no messages were posted
+    YF.small <- YF.small[with(YF.small, order(date, hour)),]
+    fill <- seq(ymd_h(paste(as.character(format(YF.small[1, "date"], tz="EST")), YF.small[1, "hour"]), tz = "EST"),
+                ymd_h(paste(as.character(format(YF.small[nrow(YF.small)-1, "date"], tz="EST")), YF.small[nrow(YF.small)-1, "hour"]),tz = "EST"),
+                by="hour")
+    YF.small <- full_join(YF.small, data.frame(date = date(fill), hour = hour(fill))) #This methodology inspired by https://stackoverflow.com/questions/16787038/insert-rows-for-missing-dates-times
+    YF.small <- YF.small[with(YF.small, order(date, hour)),]
+	
+    ## Lag scores
+    for(i in seq(1,72)) YF.small <- slide(YF.small, Var = "YF.score", slideBy = -i)
+    YF.small <- tail(YF.small, -72) #Drop rows with lagged NA values
+    YF.small <- YF.small[,-c(3:9)] #Remove most recent 7 hours of sentiment data
+    
+    ## Merge score data
+    sent.df <- merge(ST.small, T.small, by = c("date", "hour"))
+    sent.df <- merge(sent.df, YF.small, by = c("date", "hour"))
+    sent.df <- sent.df[with(sent.df, order(date, hour)),]
+    
+    return(sent.df)
+}
+```
+
+Using the *combineSent* function from above, I make final preparations for modeling each ticker performance below. As this project was performed modularly and I wanted to be able to easily clean up my session environment before modeling, the resulting sentiment data for each ticker were saved as RDS files for importation during the modeling phase.
+
+```{r}
+## Create list of sources for each ticker
+ST <- ls(pattern = '.\\.ST$') #Get list of StockTwits objects
+Tw <- ls(pattern = '.\\.T$') #Get list of Twitter objects
+YF <- ls(pattern = '.\\.YF$') #Get list of Yahoo Finance objects
+listCombo <- list()
+for(i in 1:length(ST)){
+    listCombo[[i]] <- c(ST[i], Tw[i], YF[i])
+}
+
+## Save combined data for each ticker to RDS file
+setwd('C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentStockPredictions_Expanded/Analysis')
+for(i in 1:length(listCombo)){
+    saveRDS(combineSent(listCombo[[i]][1], listCombo[[i]][2], listCombo[[i]][3]), paste0('Data/TickerRDS/', strsplit(ST[i], "\\.")[[1]][1],'.RDS'))
+}
+```
+
+### Sentiment-Based Model Development
+Having prepared predictor sentiment variables, I next pulled both minute and hour closing price data for AAPL and XOM stock tickers. This price data was used to calculate hourly percent returns and hourly volatility before merging with sentiment data, splitting training and test datasets, evaluating stationarity among all variables present in my analysis, differencing stock measures based on stationarity test outcomes, and developing, cross-validating, testing, and comparing various models. To assess the effectiveness of machine learning models for stock price, return, and volatility modeling and prediction, four model types were developed in particular:
+
+1. Random Forest Regression
+2. Extreme Gradient Boosting Regression
+3. K-Nearest-Neighbors Regression
+4. Generalized Additive Model with Regression Splines
+
+The code contained in this section was written in a standalone R file and **both console output and plots were output to external files for easier review and comparison.** Since I wanted to start this phase of development with a clean environment, I first remove all objects left over from above, garbage collect, and reload needed libraries.
+
+```{r}
+## Housekeeping tasks
+rm(list = ls())
+gc()
+
+require(randomForest)
+require(xgboost)
+require(caret)
+require(miscTools)
+require(ggplot2)
+require(doParallel)
+registerDoParallel(cores=4)
+require(lattice)
+require(TSPred)
+require(lubridate)
+require(dplyr)
+require(plyr)
+require(tseries)
+require(timeSeries)
+
+setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentStockPredictions_Expanded/Analysis")
+```
+
+#### Get Stock Measures
+In order to model and predict stock hourly closing prices, percent returns, and volatility, I first pulled minute-by-minute and hourly stock closing price data via the Barchart Solutions API. This consists of populating a Barchart URL with arguments such as ticker symbol, start date (stock data pulled beginning with 02-26-2018 for this analysis due to available sentiment data), desired time intervals, and my private API key. After pulling said data, I extracted date and hour variables from the returned from the timestamps returned with each observation. In the case of hourly stock data, I also computed differenced closing price and percent returns at this time. I bundled these operations into the *getStockData* function as below.
+
+```{r}
+getStockData <- function(tick, interval = "1"){
+    #sink(paste0("getTrainTest_", tick, ".txt"))
+    
+    ## Get minute data and extract date, hour, and minute
+    myKey <- readLines('Data/Keys/barchartAPI_key.txt')
+    stock <- read.csv(paste0("https://marketdata.websol.barchart.com/getHistory.csv?apikey=", myKey, "&symbol=", tick, "&type=minutes&startDate=20180226&maxRecords=15000&interval=", interval, "&order=asc&sessionFilter=EFK&splits=true&dividends=true&volume=sum&nearby=1&jerq=true"), stringsAsFactors = FALSE)
+    stock$timestamp <- ymd_hms(strptime(stock$timestamp,"%FT%H:%M:%S", tz = "EST"), tz = "EST")
+    stock$date <- date(stock$timestamp)
+    stock$hour <- hour(stock$timestamp)
+    if(interval == "1"){
+        stock$minute <- minute(stock$timestamp)
+    }
+    else if(interval == "60"){
+        stock$close.diff <- c(NA,diff(stock$close))
+        stock$return.percent <- returns(stock$close) * 100
+    }
+    
+    return(stock)
+}
+```
+
+Execution of the above function is conducted for minute-by-minute and hourly pulls via the following calls for each ticker.
+
+```{r}
+AAPL.minute <- getStockData("AAPL", "1")
+AAPL.hour <- getStockData("AAPL", "60")
+XOM.minute <- getStockData("XOM", "1")
+XOM.hour <- getStockData("XOM", "60")
+```
+
+Having pulled these data and calculated differenced closing price and percent returns, I next calculated hourly volatility. This was performed in its own function, *addVolatility*, since it involves computing hourly standard deviation using the minute-by-minute closing prices. After performing this calculation, the new aggregated standard deviations were merged with the hourly dataset. It was also at this time that differenced volatility was computed for assessment during stationarity testing.
+
+```{r}
+## Calculate hourly volatility
+addVolatility <- function(df.x, minuteData){
+    #ddply usage inspired by https://stats.stackexchange.com/questions/7422/calculating-hourly-volatility-and-peak-to-average-ratio-in-r?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
+    hourlyVol = ddply(.data = minuteData, .variables = .(date , hour),
+                  .fun = function(x){
+                      to_return = data.frame(volatility = sd(x$close))
+                      return( to_return )
+                  })
+    df.merged <- merge(df.x, hourlyVol, by = c("date", "hour"), all.x = TRUE)
+    df.merged <- df.merged[order(df.merged$date, df.merged$hour),]
+    df.merged$volatility.diff <- c(NA, diff(df.merged$volatility)) #Create differenced volatility
+    return(df.merged)
+}
+
+AAPL.response <- addVolatility(AAPL.hour, AAPL.minute)
+XOM.response <- addVolatility(XOM.hour, XOM.minute)
+```
+
+The resulting hourly closing price, differenced hourly closing price, hourly percent return, hourly volatility, and hourly differenced volatility data are next plotted below.
+
+```{r}
+## View basic plots of stock measures
+plotResponses <- function(df, tick){
+    par(mfrow=c(3,2))
+    plot(df$close, type = 'l', main = paste(tick, "Hourly Close Price"))
+    plot(df$close.diff, type = 'l', main = paste(tick, "Hourly Close Price (Differenced)"))
+    plot(df$return.percent, type = 'l', main = paste(tick, "Hourly Return (%)"))
+    plot(df$volatility, type = 'l', main = paste(tick, "Hourly Volatility"))
+    plot(df$volatility.diff, type = 'l', main = paste(tick, "Hourly Volatility (Differenced)"))
+    par(mfrow=c(1,1))
+}
+
+plotResponses(AAPL.response, "AAPL")
+plotResponses(XOM.response, "XOM")
+```
+
+#### Get Stock Measures
+With relevant stock measures compiled since 2-26-2018, I next merged my sentiment scores and stock measures together. This was performed by merging on date and hour and keeping only date/hour combinations present in the stock measure data. Though now removing off hour sentiment observations (e.g. night and weekend), including 72 hours of lagged sentiment data ensures I still have insight to off hour sentiment to predict stock measures during standard trade hours.
+
+Train and test splits were also derived at this time. Data to be used for training and cross-validation purposes were identified as observations between 2-26-2018 and 4-4-2018. Data to be used strictly for prediction purposes were identified as observations between 4-4-2018 and 4-13-2018. This amounted to approximately 80% of the data available being used for training and about 20% being used for testing. While splitting train and test datasets, I also filled NA sentiment scores with zeroes (NA values were present due to the date/hour filling operation performed earlier that added placeholders for date/hour combinations during which no social media or news messages had been posted) and updated sentiment score column names to be compatible with the modeling functions used later.
+
+All these operations are included in the *mergeSentiment* function below.
+
+```{r}
+## Merge sentiment data with stock data for model development
+mergeSentiment <- function(df, tick){
+    tickSent <- readRDS(paste0('Data/TickerRDS/', tick, '.RDS'))
+    
+    ## Start with training data
+    tickSent.train <- merge(tickSent, df[, c("date",
+                                             "hour",
+                                             "close",
+                                             "close.diff",
+                                             "return.percent",
+                                             "volatility",
+                                             "volatility.diff")],
+                            by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.train <- tickSent.train[tickSent.train$date > "2018-02-26" & tickSent.train$date <= "2018-04-04",] #Incomplete sentiment data before 2-26-18
+    tickSent.train[is.na(tickSent.train)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.train) <- gsub(x = colnames(tickSent.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    tickSent.train <- tickSent.train[with(tickSent.train, order(date, hour)),]
+    
+    ## Create prediction dataset next
+    tickSent.pred <- merge(tickSent, df[, c("date",
+                                            "hour",
+                                            "close",
+                                            "close.diff",
+                                            "return.percent",
+                                            "volatility",
+                                            "volatility.diff")],
+                           by = c("date", "hour"), all.y = TRUE) #Keep only rows containing stock price (since sentiment was lagged before this, we still have lagged sentiment effects)
+    tickSent.pred <- tickSent.pred[tickSent.pred$date > "2018-04-04" & tickSent.pred$date <= "2018-04-13",] #20% of data set aside for predictions
+    tickSent.pred[is.na(tickSent.pred)] <- 0 #Fill any NA sentiment scores with 0
+    colnames(tickSent.pred) <- gsub(x = colnames(tickSent.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    tickSent.pred <- tickSent.pred[with(tickSent.pred, order(date, hour)),]
+    
+    return(list(tickSent.train, tickSent.pred))
+}
+
+AAPL <- mergeSentiment(AAPL.response, "AAPL")
+XOM <- mergeSentiment(XOM.response, "XOM")
+```
+
+#### Check Data Stationarity
+
+
+
+The first step during this phase was to load both the hourly stock price high data obtained from Gopi's contact, Bryant Sheehy at Barchart Solutions, and sentiment data saved to RDS files earlier. In so doing, I combined the stock price hourly high data from each stock with the ticker's respective sentiment data, designated my training data to be between dates 2/27/18 to 3/14/18, designated prediction/test data to be between 3/15/18 to 3/20/18, and evaluated stationarity of both sentiment and hourly stock data. The split into training vs. prediction data was identified to obtain a roughly 80%/20% split during model development and evaluation.
+
+All outputs produced by the *getTrainTest* function below are printed to the *'getTrainTest_'* prefixed text files submitted with this notebook (while all files were written to the same directory as this notebook in code execution, I've added them to the zipped folder provided with this assignment submission). Similarly, plots were written to the *'Stationarity_'* prefixed PDFs.
+
+A few examples of stationarity test results are provided below. Most tickers' sentiment data (all column indices besides the very last one at the far right) had p-values less than 0.05 or less than (or near to) 0.1, indicating there is sufficient evidence to suggest stationarity in the data with 95% or 90% confidence respectively. Hourly high price results, however, almost always fail to reject the null hypothesis that stock price is non-stationary (hourly high price is the last column at the far right). All but SPG stock prices were non-stationary for the given window of data. The most common situation of stationarity in score data and non-stationarity in price data is represented by the AAPL results below.
+
+![AAPL Data DF and ADF Test Results](Stationarity_AAPL.pdf){width=800px height=800px}
+
+In other cases, such as in VZ results below, there were a small number of lagged sentiment data columns which seem to be non-stationary. The reason these lagged scores ended up being non-stationary but other lagged scores did not is likely due in part to the fact that scores were lagged prior to combining price data, after which non-trade hour date/hour combinations were dropped. This may have caused some breaks in the lagged data at intervals, potentially introducing non-stationary patterns that are not true to the full sentiment dataset itself. Given the nature of the application and purpose of the lagged sentiment data, however, I deemed this acceptable and chose not to difference these sentiment data. Instead, versions of each ticker's dataset with differenced hourly high price response variables were also created for model development.
+
+![VZ Data DF and ADF Test Results](Stationarity_VZ.pdf){width=800px height=800px}
+
+Finally, in cases where sentiment data is sparse and some lagged sentiment scores contain only zero values, Dickey-Fuller and Augmented Dickey-Fuller are unable to produce p-value results. Such is the case with the SPG ticker as indicated below. Noted also is the stationary hourly high price response variable as mentioned above.
+
+![SPG Data DF and ADF Test Results](Stationarity_SPG.pdf){width=800px height=800px}
+
+#### Random Forest Regression Model
+The first of the three types of models developed for each ticker was the Random Forest Regression model. The below *doRF* function was written to train 72 different random forest models for a single ticker/diff-nonDiff price/evaluation metric combination using cross-validation. Specifically, timeslice cross-validation was implemented to perform rolling forecasting origin resampling to identify the best *mtry* value for the random forest algorithm. A window size of 35 (5 trade days) was used initially with a 14 hour horizon for hold-out. I chose to not use a fixed window in my case so as to utilize more data for training with each round of iteration. 44 resamples were used to evaluate *mtry* parameter values from 1-72.
+
+After the most accurate *mtry* value was identified via my cross-validated grid search training methodology, I also computed R-squared, MSE, RMSE, MAE, and MAPE values for both cross-validated training data as well as the data set aside earlier for prediction purposes (dates 3/15/18 to 3/20/18). Predicted vs. actual values were plotted to PDF for visual R-squared evaluation on both cross-validated training data and prediction data. Next, I also plotted the actual hourly ticker data compared to the modeled values with respect to time (See *RFplots_* prefixed PDFs). This was done to indicate performance against both training and prediction data. When differenced price data was being predicted, the differenced plot outputs were back-transformed to compare apples-to-apples with non-differenced model performance (used cumulative sum calculation for this).
+
+Finally, feature importance rankings were also saved for the best model based on cross-validated, grid searched training. These feature rankings are later exported to Tableau for thorough review.
+
+```{r}
+doRF <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
+    tryCatch({
+        ## Write outputs to external files for later review
+        sink(paste0("doRF_", tick, xform, "_", metric, ".txt"))
+        pdf(paste0('RFplots_',tick, xform, '_', metric, '.pdf'))
+        
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
+        
+        ## Create Random Forest Seeds
+        # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:43) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[44]] <- sample.int(1000, 1)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice",
+                                   initialWindow = 35,
+                                   horizon = 14, fixedWindow = FALSE,
+                                   allowParallel = TRUE,
+                                   seeds = seeds,
+                                   search = "grid") #35 day cv training, 14 day cv testing
+        tuneGridRF <- expand.grid(.mtry=c(1:72))
+        #metric <- "Rsquared"
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        rf <- train(high ~ ., data = train.df[,cols],
+                    method = "rf",
+                    metric = metric,
+                    trControl = ts.control,
+                    tuneGrid = tuneGridRF,
+                    importance=TRUE)
+        print(Sys.time() - start)
+
+        cat("\nRF Output\n")
+        print(rf)
+        print(plot(rf))
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df$high, train.df$high - predict(rf, train.df[,cols]))
+        r2.pred <- rSquared(pred.df$high, pred.df$high - predict(rf, pred.df[,cols]))
+        mse.train <- mean((train.df$high - predict(rf, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df$high - predict(rf, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df$high - predict(rf, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df$high - predict(rf, pred.df[,cols])))
+        mape.train <- MAPE(train.df$high, predict(rf, train.df[,cols]))
+        mape.pred <- MAPE(pred.df$high, predict(rf, pred.df[,cols]))
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=train.df$high, pred=predict(rf, train.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "RandomForest Regression: Training r^2 =", r2.train)))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df$high, pred=predict(rf, pred.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "RandomForest Regression: Prediction r^2 =", r2.pred)))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df$high[1], train.df$high)),
+                              cumsum(c(orig.pred.df$high[1], pred.df$high)))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Cumulative Sum of Price[1] and DIff = Price",
+                 xaxt = "n",
+                 main = paste(tick, "RF Performance (Diff): Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
+            text(1:(sum(length(train.df$high), length(pred.df$high))),
+                 par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour),
+                                                 paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df$high[1], predict(rf, train.df[,cols]))),
+                    cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols])))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df$high)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df$high[1], pred.df$high))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n",
+                 ylim = c(min(c(cumsum(c(orig.pred.df$high[1],
+                                         predict(rf, pred.df[,cols]))),
+                                cumsum(c(orig.pred.df$high[1], pred.df$high)))),
+                          max(c(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))),
+                                cumsum(c(orig.pred.df$high[1], pred.df$high))))),
+                 main = paste(tick, "RF Performance (Diff): Prediction"))
+            axis(1, at=1:(length(pred.df$high)), labels=FALSE)
+            text(1:(length(pred.df$high)), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df$high[1], predict(rf, pred.df[,cols]))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(train.df$high, pred.df$high)),
+                 type = "l", lty = 1, xlab = "Date & Hour", ylab = "Price",
+                 xaxt = "n", main = paste(tick, "RF Performance: Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df$high), length(pred.df$high))), labels=FALSE)
+            text(1:(sum(length(train.df$high), length(pred.df$high))),
+                 par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour),
+                                                 paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(rf, train.df[,cols]),predict(rf, pred.df[,cols])),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df$high)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(pred.df$high), type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Price", xaxt = "n", ylim = c(min(c(predict(rf, pred.df[,cols]),
+                                                            pred.df$high)),
+                                                      max(c(predict(rf, pred.df[,cols]),
+                                                            pred.df$high))),
+                 main = paste(tick, "RF Performance: Prediction"))
+            axis(1, at=1:(length(pred.df$high)), labels=FALSE)
+            text(1:(length(pred.df$high)), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(rf, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        
+        ## Get feature importance
+        feat.imp <- varImp(rf)
+        plot(feat.imp, main = paste(tick, "RF Feature Importance"))
+        
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, "RF failed"))
+    })
+    
+    
+    return(list(rf, list(r2.train, r2.pred), list(mse.train, mse.pred),
+                list(rmse.train, rmse.pred), list(mae.train, mae.pred),
+                list(mape.train,mape.pred), feat.imp))
+}
+```
+
+The above *doRF* function was called via several combinations of ticker, R-squared vs. RMSE evaluation metrics, and differenced vs. non-differenced price data. So for each ticker, I effectively created 288 different random forest models for a total of 3168 in my analysis. Since the cross-validated, grid search training methodology used evaluates the best of the 72 *mtry* parameter-tuned models for me by evaluating R-squared or RMSE values, I really only needed to review 4 random forest models per ticker, or 44 in total.
+
+```{r}
+startOverall <- Sys.time() #Start Overall timer
+
+AAPL.rf.Rsquared <- doRF(AAPL[[1]], AAPL[[2]], "AAPL", "Rsquared")
+AMZN.rf.Rsquared <- doRF(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
+BA.rf.Rsquared   <- doRF(BA[[1]], BA[[2]], "BA", "Rsquared")
+DWDP.rf.Rsquared <- doRF(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
+JNJ.rf.Rsquared  <- doRF(JNJ[[1]], JNJ[[2]], "JNJ", "Rsquared")
+JPM.rf.Rsquared  <- doRF(JPM[[1]], JPM[[2]], "JPM", "Rsquared")
+NEE.rf.Rsquared  <- doRF(NEE[[1]], NEE[[2]], "NEE", "Rsquared")
+PG.rf.Rsquared   <- doRF(PG[[1]], PG[[2]], "PG", "Rsquared")
+SPG.rf.Rsquared  <- doRF(SPG[[1]], SPG[[2]], "SPG", "Rsquared")
+VZ.rf.Rsquared   <- doRF(VZ[[1]], VZ[[2]], "VZ", "Rsquared")
+XOM.rf.Rsquared  <- doRF(XOM[[1]], XOM[[2]], "XOM", "Rsquared")
+
+AAPL.rf.RMSE <- doRF(AAPL[[1]], AAPL[[2]], "AAPL", "RMSE")
+AMZN.rf.RMSE <- doRF(AMZN[[1]], AMZN[[2]], "AMZN", "RMSE")
+BA.rf.RMSE   <- doRF(BA[[1]], BA[[2]], "BA", "RMSE")
+DWDP.rf.RMSE <- doRF(DWDP[[1]], DWDP[[2]], "DWDP", "RMSE")
+JNJ.rf.RMSE  <- doRF(JNJ[[1]], JNJ[[2]], "JNJ", "RMSE")
+JPM.rf.RMSE  <- doRF(JPM[[1]], JPM[[2]], "JPM", "RMSE")
+NEE.rf.RMSE  <- doRF(NEE[[1]], NEE[[2]], "NEE", "RMSE")
+PG.rf.RMSE   <- doRF(PG[[1]], PG[[2]], "PG", "RMSE")
+SPG.rf.RMSE  <- doRF(SPG[[1]], SPG[[2]], "SPG", "RMSE")
+VZ.rf.RMSE   <- doRF(VZ[[1]], VZ[[2]], "VZ", "RMSE")
+XOM.rf.RMSE  <- doRF(XOM[[1]], XOM[[2]], "XOM", "RMSE")
+
+AAPLdiff.rf.Rsquared <- doRF(AAPL[[3]], AAPL[[4]], "AAPL", "Rsquared", "diff", AAPL[[1]], AAPL[[2]])
+AMZNdiff.rf.Rsquared <- doRF(AMZN[[3]], AMZN[[4]], "AMZN", "Rsquared", "diff", AMZN[[1]], AMZN[[2]])
+BAdiff.rf.Rsquared   <- doRF(BA[[3]], BA[[4]], "BA", "Rsquared", "diff", BA[[1]], BA[[2]])
+DWDPdiff.rf.Rsquared <- doRF(DWDP[[3]], DWDP[[4]], "DWDP", "Rsquared", "diff", DWDP[[1]], DWDP[[2]])
+JNJdiff.rf.Rsquared  <- doRF(JNJ[[3]], JNJ[[4]], "JNJ", "Rsquared", "diff", JNJ[[1]], JNJ[[2]])
+JPMdiff.rf.Rsquared  <- doRF(JPM[[3]], JPM[[4]], "JPM", "Rsquared", "diff", JPM[[1]], JPM[[2]])
+NEEdiff.rf.Rsquared  <- doRF(NEE[[3]], NEE[[4]], "NEE", "Rsquared", "diff", NEE[[1]], NEE[[2]])
+PGdiff.rf.Rsquared   <- doRF(PG[[3]], PG[[4]], "PG", "Rsquared", "diff", PG[[1]], PG[[2]])
+SPGdiff.rf.Rsquared  <- doRF(SPG[[3]], SPG[[4]], "SPG", "Rsquared", "diff", SPG[[1]], SPG[[2]])
+VZdiff.rf.Rsquared   <- doRF(VZ[[3]], VZ[[4]], "VZ", "Rsquared", "diff", VZ[[1]], VZ[[2]])
+XOMdiff.rf.Rsquared  <- doRF(XOM[[3]], XOM[[4]], "XOM", "Rsquared", "diff", XOM[[1]], XOM[[2]])
+
+AAPLdiff.rf.RMSE <- doRF(AAPL[[3]], AAPL[[4]], "AAPL", "RMSE", "diff", AAPL[[1]], AAPL[[2]])
+AMZNdiff.rf.RMSE <- doRF(AMZN[[3]], AMZN[[4]], "AMZN", "RMSE", "diff", AMZN[[1]], AMZN[[2]])
+BAdiff.rf.RMSE   <- doRF(BA[[3]], BA[[4]], "BA", "RMSE", "diff", BA[[1]], BA[[2]])
+DWDPdiff.rf.RMSE <- doRF(DWDP[[3]], DWDP[[4]], "DWDP", "RMSE", "diff", DWDP[[1]], DWDP[[2]])
+JNJdiff.rf.RMSE  <- doRF(JNJ[[3]], JNJ[[4]], "JNJ", "RMSE", "diff", JNJ[[1]], JNJ[[2]])
+JPMdiff.rf.RMSE  <- doRF(JPM[[3]], JPM[[4]], "JPM", "RMSE", "diff", JPM[[1]], JPM[[2]])
+NEEdiff.rf.RMSE  <- doRF(NEE[[3]], NEE[[4]], "NEE", "RMSE", "diff", NEE[[1]], NEE[[2]])
+PGdiff.rf.RMSE   <- doRF(PG[[3]], PG[[4]], "PG", "RMSE", "diff", PG[[1]], PG[[2]])
+SPGdiff.rf.RMSE  <- doRF(SPG[[3]], SPG[[4]], "SPG", "RMSE", "diff", SPG[[1]], SPG[[2]])
+VZdiff.rf.RMSE   <- doRF(VZ[[3]], VZ[[4]], "VZ", "RMSE", "diff", VZ[[1]], VZ[[2]])
+XOMdiff.rf.RMSE  <- doRF(XOM[[3]], XOM[[4]], "XOM", "RMSE", "diff", XOM[[1]], XOM[[2]])
+
+print(Sys.time() - startOverall)
+```
+
+An example of what the plotted outputs look like as generated by *doRF* is as follows (JPM,differenced,RMSE results shown).
+
+![JPM, Differenced, RMSE RF Model Evaluation Output](RFplots_JPM_RMSE.pdf){width=800px height=800px}
+
+#### Extreme Gradient Boosting Regression Model
+The same methodology of timeslice cross-validation as Random Forest was used to train my XGBoost models in *doXGB*. The big difference, of course, is that different hyperparameters were used in my grid search implementation. Due to training time and computer resource limitations, I kept my grid search rather small so that only 12 unique combinations of *nrounds*, *eta*, *max_depth*, *colsample_bytree*, *subsample*, and *min_child_weight* were used for training and evaluation.
+
+As was done for random forest, R-squared, MSE, RMSE, MAE, and MAPE metrics were calculated for both cross-validated training data and prediction data. Visual R-squared evaluation plots and actual vs. predicted stock prices were plotted to PDF for both training and prediction datasets (See *XGBplots_* prefixed PDFs). Finally, feature importance rankings were captured (except in cases where the algorithm was unable to produce reliable results given the hyperparameter values used in the grid search and data combination produced a constant tree; see https://github.com/dmlc/xgboost/issues/2876).
+
+```{r}
+doXGB <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
+    tryCatch({
+        ## Write outputs to external files for later review
+        sink(paste0("doXGB_", tick, xform, "_", metric, ".txt"))
+        pdf(paste0('XGBplots_',tick, xform, '_', metric, '.pdf'))
+        
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% c("date", "high")]
+        X.train <- data.matrix(train.df[,cols])
+        X.test <- data.matrix(pred.df[,cols])
+        Y.train <- train.df$high
+        Y.test <- pred.df$high
+        
+        ## Create seeds
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 44) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:43) seeds[[i]] <- sample.int(1000, 12) #sample.int second argument value based on expand.grid nrows
+        seeds[[44]] <- sample.int(1000, 1)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE, search = "grid") #35 day cv training, 14 day cv testing
+        metric <- "RMSE"
+        #See parameter descriptions at http://xgboost.readthedocs.io/en/latest/parameter.html
+        tuneGridXGB <- expand.grid(
+            nrounds=350,
+            eta = c(0.3, 0.5),
+            gamma = c(0, 1, 5),
+            max_depth = 6,
+            colsample_bytree = c(0.5, 1),
+            subsample = 0.5,
+            min_child_weight = 1)
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        xgbmod <- train(
+            x = X.train,
+            y = Y.train,
+            method = 'xgbTree',
+            metric = metric,
+            trControl = ts.control,
+            tuneGrid = tuneGridXGB,
+            importance=TRUE)
+        print(Sys.time() - start)
+        cat("\nXGB Output\n")
+        print(xgbmod)
+        print(plot(xgbmod))
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(Y.train, Y.train - predict(xgbmod, X.train))
+        r2.pred <- rSquared(Y.test, Y.test - predict(xgbmod, X.test))
+        mse.train <- mean((Y.train - predict(xgbmod, X.train))^2)
+        mse.pred <- mean((Y.test - predict(xgbmod, X.test))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(Y.train - predict(xgbmod, X.train)))
+        mae.pred <- mean(abs(Y.test - predict(xgbmod, X.test)))
+        mape.train <- MAPE(Y.train, predict(xgbmod, X.train))
+        mape.pred <- MAPE(Y.test, predict(xgbmod, X.test))
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.train, pred=predict(xgbmod, X.train)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste("XGBoost Regression in R r^2=", r2.train, sep="")))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.test, pred=predict(xgbmod, X.test)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste("XGBoost Regression in R r^2=", r2.pred, sep="")))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)),
+                              cumsum(c(orig.pred.df$high[1], Y.test)))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Cumulative Sum of Price[1] and DIff = Price",xaxt = "n",
+                 main = paste(tick, "XGBoost Performance (Diff): Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2,
+                 labels = c(paste(train.df$date, train.df$hour),
+                            paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df$high[1], predict(xgbmod, X.train))),
+                    cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test)))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n",
+                 ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))),
+                                cumsum(c(orig.pred.df$high[1], Y.test)))),
+                          max(c(cumsum(c(orig.pred.df$high[1],predict(xgbmod, X.test))),
+                                cumsum(c(orig.pred.df$high[1], Y.test))))),
+                 main = paste(tick, "XGBoost Performance (Diff): Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2,
+                 xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df$high[1], predict(xgbmod, X.test))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1,
+                 xlab = "Date & Hour", ylab = "Price", xaxt = "n",
+                 main = paste(tick, "XGBoost Performance: Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2,
+                 labels = c(paste(train.df$date, train.df$hour),
+                            paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(xgbmod, train.df[,cols]),predict(xgbmod, X.test)),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Price", xaxt = "n", ylim = c(min(c(predict(xgbmod, X.test), Y.test)),
+                                                      max(c(predict(xgbmod, X.test), Y.test))),
+                 main = paste(tick, "XGBoost Performance: Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2,
+                 xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(xgbmod, X.test), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        tryCatch({
+            feat.imp <- varImp(xgbmod)
+            print(plot(feat.imp, main = paste(tick, "XGB Feature Importance")))
+            
+            on.exit(dev.off())
+            on.exit(sink(), add = TRUE)
+            return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred),
+                        list(rmse.train, rmse.pred), list(mae.train, mae.pred),
+                        list(mape.train, mape.pred), feat.imp))
+        }, error = function(e){
+            on.exit(dev.off())
+            on.exit(sink(), add = TRUE)
+            return(list(xgbmod, list(r2.train, r2.pred), list(mse.train, mse.pred),
+                        list(rmse.train, rmse.pred), list(mae.train, mae.pred),
+                        list(mape.train, mape.pred), NA))
+        })
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, "XGB failed"))
+    })
+    
+}
+```
+
+Similar to random forest and its associated function, the above *doXGB* function was called via several combinations of ticker, R-squared vs. RMSE evaluation metrics, and differenced vs. non-differenced price data. I effectively created 48 different XGB models for a total of 528 in my analysis. Since the cross-validated, grid search training methodology used evaluates the best of the 12 combinations of *nrounds*, *eta*, *max_depth*, *colsample_bytree*, *subsample*, and *min_child_weight* parameter-tuned models for me by evaluating R-squared or RMSE values, I was left with only 44 in total for manual review.
+
+```{r}
+startOverall <- Sys.time() #Start Overall timer
+
+AAPL.xgb.Rsquared <- doXGB(AAPL[[1]], AAPL[[2]], "AAPL", "Rsquared")
+AMZN.xgb.Rsquared <- doXGB(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
+BA.xgb.Rsquared   <- doXGB(BA[[1]], BA[[2]], "BA", "Rsquared")
+DWDP.xgb.Rsquared <- doXGB(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
+JNJ.xgb.Rsquared  <- doXGB(JNJ[[1]], JNJ[[2]], "JNJ", "Rsquared")
+JPM.xgb.Rsquared  <- doXGB(JPM[[1]], JPM[[2]], "JPM", "Rsquared")
+NEE.xgb.Rsquared  <- doXGB(NEE[[1]], NEE[[2]], "NEE", "Rsquared")
+PG.xgb.Rsquared   <- doXGB(PG[[1]], PG[[2]], "PG", "Rsquared")
+SPG.xgb.Rsquared  <- doXGB(SPG[[1]], SPG[[2]], "SPG", "Rsquared")
+VZ.xgb.Rsquared   <- doXGB(VZ[[1]], VZ[[2]], "VZ", "Rsquared")
+XOM.xgb.Rsquared  <- doXGB(XOM[[1]], XOM[[2]], "XOM", "Rsquared")
+
+AAPL.xgb.RMSE <- doXGB(AAPL[[1]], AAPL[[2]], "AAPL", "RMSE")
+AMZN.xgb.RMSE <- doXGB(AMZN[[1]], AMZN[[2]], "AMZN", "RMSE")
+BA.xgb.RMSE   <- doXGB(BA[[1]], BA[[2]], "BA", "RMSE")
+DWDP.xgb.RMSE <- doXGB(DWDP[[1]], DWDP[[2]], "DWDP", "RMSE")
+JNJ.xgb.RMSE  <- doXGB(JNJ[[1]], JNJ[[2]], "JNJ", "RMSE")
+JPM.xgb.RMSE  <- doXGB(JPM[[1]], JPM[[2]], "JPM", "RMSE")
+NEE.xgb.RMSE  <- doXGB(NEE[[1]], NEE[[2]], "NEE", "RMSE")
+PG.xgb.RMSE   <- doXGB(PG[[1]], PG[[2]], "PG", "RMSE")
+SPG.xgb.RMSE  <- doXGB(SPG[[1]], SPG[[2]], "SPG", "RMSE")
+VZ.xgb.RMSE   <- doXGB(VZ[[1]], VZ[[2]], "VZ", "RMSE")
+XOM.xgb.RMSE  <- doXGB(XOM[[1]], XOM[[2]], "XOM", "RMSE")
+
+AAPLdiff.xgb.Rsquared <- doXGB(AAPL[[3]], AAPL[[4]], "AAPL", "Rsquared", "diff", AAPL[[1]], AAPL[[2]])
+AMZNdiff.xgb.Rsquared <- doXGB(AMZN[[3]], AMZN[[4]], "AMZN", "Rsquared", "diff", AMZN[[1]], AMZN[[2]])
+BAdiff.xgb.Rsquared   <- doXGB(BA[[3]], BA[[4]], "BA", "Rsquared", "diff", BA[[1]], BA[[2]])
+DWDPdiff.xgb.Rsquared <- doXGB(DWDP[[3]], DWDP[[4]], "DWDP", "Rsquared", "diff", DWDP[[1]], DWDP[[2]])
+JNJdiff.xgb.Rsquared  <- doXGB(JNJ[[3]], JNJ[[4]], "JNJ", "Rsquared", "diff", JNJ[[1]], JNJ[[2]])
+JPMdiff.xgb.Rsquared  <- doXGB(JPM[[3]], JPM[[4]], "JPM", "Rsquared", "diff", JPM[[1]], JPM[[2]])
+NEEdiff.xgb.Rsquared  <- doXGB(NEE[[3]], NEE[[4]], "NEE", "Rsquared", "diff", NEE[[1]], NEE[[2]])
+PGdiff.xgb.Rsquared   <- doXGB(PG[[3]], PG[[4]], "PG", "Rsquared", "diff", PG[[1]], PG[[2]])
+SPGdiff.xgb.Rsquared  <- doXGB(SPG[[3]], SPG[[4]], "SPG", "Rsquared", "diff", SPG[[1]], SPG[[2]])
+VZdiff.xgb.Rsquared   <- doXGB(VZ[[3]], VZ[[4]], "VZ", "Rsquared", "diff", VZ[[1]], VZ[[2]])
+XOMdiff.xgb.Rsquared  <- doXGB(XOM[[3]], XOM[[4]], "XOM", "Rsquared", "diff", XOM[[1]], XOM[[2]])
+
+AAPLdiff.xgb.RMSE <- doXGB(AAPL[[3]], AAPL[[4]], "AAPL", "RMSE", "diff", AAPL[[1]], AAPL[[2]])
+AMZNdiff.xgb.RMSE <- doXGB(AMZN[[3]], AMZN[[4]], "AMZN", "RMSE", "diff", AMZN[[1]], AMZN[[2]])
+BAdiff.xgb.RMSE   <- doXGB(BA[[3]], BA[[4]], "BA", "RMSE", "diff", BA[[1]], BA[[2]])
+DWDPdiff.xgb.RMSE <- doXGB(DWDP[[3]], DWDP[[4]], "DWDP", "RMSE", "diff", DWDP[[1]], DWDP[[2]])
+JNJdiff.xgb.RMSE  <- doXGB(JNJ[[3]], JNJ[[4]], "JNJ", "RMSE", "diff", JNJ[[1]], JNJ[[2]])
+JPMdiff.xgb.RMSE  <- doXGB(JPM[[3]], JPM[[4]], "JPM", "RMSE", "diff", JPM[[1]], JPM[[2]])
+NEEdiff.xgb.RMSE  <- doXGB(NEE[[3]], NEE[[4]], "NEE", "RMSE", "diff", NEE[[1]], NEE[[2]])
+PGdiff.xgb.RMSE   <- doXGB(PG[[3]], PG[[4]], "PG", "RMSE", "diff", PG[[1]], PG[[2]])
+SPGdiff.xgb.RMSE  <- doXGB(SPG[[3]], SPG[[4]], "SPG", "RMSE", "diff", SPG[[1]], SPG[[2]])
+VZdiff.xgb.RMSE   <- doXGB(VZ[[3]], VZ[[4]], "VZ", "RMSE", "diff", VZ[[1]], VZ[[2]])
+XOMdiff.xgb.RMSE  <- doXGB(XOM[[3]], XOM[[4]], "XOM", "RMSE", "diff", XOM[[1]], XOM[[2]])
+
+print(Sys.time() - startOverall)
+```
+
+An example of what the plotted outputs look like as generated by *doXGB* is as follows (JPM,differenced,RMSE results shown).
+
+![JPM, Differenced, RMSE XGBoost Model Evaluation Output](XGBplots_JPM_RMSE.pdf){width=800px height=800px}
+
+#### Multiple Linear Regression Model
+The last type of model developed is the multiple linear regression model. Since my predictor variables are all lagged score values (with the exception of the *hour* variable), I can already expect co-correlation and covariance issues up front in my datasets. Therefore, I account for these immediately in the *doLM* function by dropping lagged variables which portray collinearity. As mentioned previously, since lagged variables were created before merging in stock data and non-trade hour observations were dropped upon merge, lagged columns will not all contain the same sequence of sentiment values. Therefore, while some lagged variables do portray collinearity, not all do. Those that do not are kept and used for modeling.
+
+The same process of timeslice cross-validation was used during multiple linear regression training. Unlike random forest and XGBoost, however, linear regression does not have parameters which may be used for tuning. After training, the same metrics were calculated and plots of R-squared evaluation and cross-validated training performance and prediction performance were plotted to PDF (See *LMplots_* prefixed PDFs). Model coefficients and confidence intervals were also set aside in case I'd like to review them later.
+
+```{r}
+doLM <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
+    tryCatch({    
+        ## Write outputs to external files for later review
+        sink(paste0("doLM_", tick, xform, "_", metric, ".txt"))
+        pdf(paste0('LMplots_',tick, xform, "_", metric, '.pdf'))
+        
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
+        
+        X.train <- train.df[,cols]
+        X.test <- pred.df[,cols]
+        Y.train <- train.df$high
+        Y.test <- pred.df$high
+        
+        ## Check for and remove collinearity between variables
+        repeat{
+            lc <- findLinearCombos(X.train[,!(colnames(X.train) %in% "high")])
+            if(!is.null(lc$remove)){
+                X.train <- X.train[,-lc$remove]
+                X.test <- X.test[,-lc$remove]
+            }
+            else break
+        }
+        
+        ## Create seed
+        set.seed(123)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE) #35 day cv training, 14 day cv testing
+        tuneLength.num <- 2
+        #metric <- "RMSE"
+        
+        ## Perform training
+        start <- Sys.time() #Start timer
+        lm.mod <- train(high ~ ., data = X.train,
+                        method = "lm",
+                        metric = metric,
+                        trControl = ts.control,
+                        tuneLength=tuneLength.num)
+        print(Sys.time() - start)
+        cat("\nRF Output\n")
+        print(lm.mod)
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df$high, train.df$high - predict(lm.mod, train.df[,cols]))
+        r2.pred <- rSquared(pred.df$high, pred.df$high - predict(lm.mod, pred.df[,cols]))
+        mse.train <- mean((train.df$high - predict(lm.mod, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df$high - predict(lm.mod, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df$high - predict(lm.mod, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df$high - predict(lm.mod, pred.df[,cols])))
+        mape.train <- MAPE(train.df$high, predict(lm.mod, train.df[,cols]))
+        mape.pred <- MAPE(pred.df$high, predict(lm.mod, pred.df[,cols]))
+        
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=Y.train, pred=predict(lm.mod, X.train)))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "Linear Regression: Training r^2 =", r2.train)))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df$high, pred=predict(lm.mod, pred.df[,cols])))
+        print(p + geom_point() +
+            geom_abline(color="red") +
+            ggtitle(paste(tick, "Linear Regression: Prediction r^2 =", r2.pred)))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)),
+                              cumsum(c(orig.pred.df$high[1], Y.test)))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n",
+                 main = paste(tick, "LM Performance (Diff): Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2,
+                 labels = c(paste(train.df$date, train.df$hour),
+                            paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df$high[1], predict(lm.mod, X.train))),
+                    cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test)))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+    
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n",
+                 ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))),
+                                cumsum(c(orig.pred.df$high[1], Y.test)))),
+                          max(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))),
+                                cumsum(c(orig.pred.df$high[1], Y.test))))),
+                 main = paste(tick, "LM Performance (Diff): Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2,
+                 xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+        }
+        else{
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1,
+                 xlab = "Date & Hour", ylab = "Price", xaxt = "n",
+                 main = paste(tick, "LM Performance: Training + Prediction"))
+            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
+            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2,
+                 labels = c(paste(train.df$date, train.df$hour),
+                            paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(predict(lm.mod, train.df[,cols]),predict(lm.mod, pred.df[,cols])),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(Y.train)+1, lty = 2, col = "blue")
+    
+            ## Plot just predicted performance
+            plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour",ylab = "Price",
+                 xaxt = "n", ylim = c(min(c(predict(lm.mod, pred.df[,cols]), Y.test)),
+                                      max(c(predict(lm.mod, pred.df[,cols]), Y.test))),
+                 main = paste(tick, "LM Performance: Prediction"))
+            axis(1, at=1:(length(Y.test)), labels=FALSE)
+            text(1:(length(Y.test)), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2,
+                 xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(predict(lm.mod, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+        }
+    
+        ## Get coefficients and confidence intervals
+        coeffs <- coef(lm.mod$finalModel)
+        confints <- confint(lm.mod$finalModel)
+        cat("/nCoefficients/n")
+        print(coeffs)
+        cat("/nConfidence Intervals/n")
+        print(confints)
+        
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, "LM failed"))
+    })
+
+    return(list(lm.mod, list(r2.train, r2.pred), list(mse.train, mse.pred),
+                list(rmse.train, rmse.pred), list(mae.train, mae.pred),
+                list(mape.train, mape.pred), coeffs, confints))
+}
+```
+
+When calling the *doLM* function using the same parameters as with random forest and XGBoost, each iteration of cross-validation produces only a single model variant - the outcome being that only 4 linear models were created in the background per ticker. This, of course, changes nothing in regards to the number of models requiring manual evaluation - 44 multiple linear regression models in total.
+
+```{r}
+startOverall <- Sys.time() #Start Overall timer
+
+AAPL.lm.Rsquared <- doLM(AAPL[[1]], AAPL[[2]], "AAPL", "Rsquared")
+AMZN.lm.Rsquared <- doLM(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
+BA.lm.Rsquared   <- doLM(BA[[1]], BA[[2]], "BA", "Rsquared")
+DWDP.lm.Rsquared <- doLM(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
+JNJ.lm.Rsquared  <- doLM(JNJ[[1]], JNJ[[2]], "JNJ", "Rsquared")
+JPM.lm.Rsquared  <- doLM(JPM[[1]], JPM[[2]], "JPM", "Rsquared")
+NEE.lm.Rsquared  <- doLM(NEE[[1]], NEE[[2]], "NEE", "Rsquared")
+PG.lm.Rsquared   <- doLM(PG[[1]], PG[[2]], "PG", "Rsquared")
+SPG.lm.Rsquared  <- doLM(SPG[[1]], SPG[[2]], "SPG", "Rsquared")
+VZ.lm.Rsquared   <- doLM(VZ[[1]], VZ[[2]], "VZ", "Rsquared")
+XOM.lm.Rsquared  <- doLM(XOM[[1]], XOM[[2]], "XOM", "Rsquared")
+
+AAPL.lm.RMSE <- doLM(AAPL[[1]], AAPL[[2]], "AAPL", "RMSE")
+AMZN.lm.RMSE <- doLM(AMZN[[1]], AMZN[[2]], "AMZN", "RMSE")
+BA.lm.RMSE   <- doLM(BA[[1]], BA[[2]], "BA", "RMSE")
+DWDP.lm.RMSE <- doLM(DWDP[[1]], DWDP[[2]], "DWDP", "RMSE")
+JNJ.lm.RMSE  <- doLM(JNJ[[1]], JNJ[[2]], "JNJ", "RMSE")
+JPM.lm.RMSE  <- doLM(JPM[[1]], JPM[[2]], "JPM", "RMSE")
+NEE.lm.RMSE  <- doLM(NEE[[1]], NEE[[2]], "NEE", "RMSE")
+PG.lm.RMSE   <- doLM(PG[[1]], PG[[2]], "PG", "RMSE")
+SPG.lm.RMSE  <- doLM(SPG[[1]], SPG[[2]], "SPG", "RMSE")
+VZ.lm.RMSE   <- doLM(VZ[[1]], VZ[[2]], "VZ", "RMSE")
+XOM.lm.RMSE  <- doLM(XOM[[1]], XOM[[2]], "XOM", "RMSE")
+
+AAPLdiff.lm.Rsquared <- doLM(AAPL[[3]], AAPL[[4]], "AAPL", "Rsquared", "diff", AAPL[[1]], AAPL[[2]])
+AMZNdiff.lm.Rsquared <- doLM(AMZN[[3]], AMZN[[4]], "AMZN", "Rsquared", "diff", AMZN[[1]], AMZN[[2]])
+BAdiff.lm.Rsquared   <- doLM(BA[[3]], BA[[4]], "BA", "Rsquared", "diff", BA[[1]], BA[[2]])
+DWDPdiff.lm.Rsquared <- doLM(DWDP[[3]], DWDP[[4]], "DWDP", "Rsquared", "diff", DWDP[[1]], DWDP[[2]])
+JNJdiff.lm.Rsquared  <- doLM(JNJ[[3]], JNJ[[4]], "JNJ", "Rsquared", "diff", JNJ[[1]], JNJ[[2]])
+JPMdiff.lm.Rsquared  <- doLM(JPM[[3]], JPM[[4]], "JPM", "Rsquared", "diff", JPM[[1]], JPM[[2]])
+NEEdiff.lm.Rsquared  <- doLM(NEE[[3]], NEE[[4]], "NEE", "Rsquared", "diff", NEE[[1]], NEE[[2]])
+PGdiff.lm.Rsquared   <- doLM(PG[[3]], PG[[4]], "PG", "Rsquared", "diff", PG[[1]], PG[[2]])
+SPGdiff.lm.Rsquared  <- doLM(SPG[[3]], SPG[[4]], "SPG", "Rsquared", "diff", SPG[[1]], SPG[[2]])
+VZdiff.lm.Rsquared   <- doLM(VZ[[3]], VZ[[4]], "VZ", "Rsquared", "diff", VZ[[1]], VZ[[2]])
+XOMdiff.lm.Rsquared  <- doLM(XOM[[3]], XOM[[4]], "XOM", "Rsquared", "diff", XOM[[1]], XOM[[2]])
+
+AAPLdiff.lm.RMSE <- doLM(AAPL[[3]], AAPL[[4]], "AAPL", "RMSE", "diff", AAPL[[1]], AAPL[[2]])
+AMZNdiff.lm.RMSE <- doLM(AMZN[[3]], AMZN[[4]], "AMZN", "RMSE", "diff", AMZN[[1]], AMZN[[2]])
+BAdiff.lm.RMSE   <- doLM(BA[[3]], BA[[4]], "BA", "RMSE", "diff", BA[[1]], BA[[2]])
+DWDPdiff.lm.RMSE <- doLM(DWDP[[3]], DWDP[[4]], "DWDP", "RMSE", "diff", DWDP[[1]], DWDP[[2]])
+JNJdiff.lm.RMSE  <- doLM(JNJ[[3]], JNJ[[4]], "JNJ", "RMSE", "diff", JNJ[[1]], JNJ[[2]])
+JPMdiff.lm.RMSE  <- doLM(JPM[[3]], JPM[[4]], "JPM", "RMSE", "diff", JPM[[1]], JPM[[2]])
+NEEdiff.lm.RMSE  <- doLM(NEE[[3]], NEE[[4]], "NEE", "RMSE", "diff", NEE[[1]], NEE[[2]])
+PGdiff.lm.RMSE   <- doLM(PG[[3]], PG[[4]], "PG", "RMSE", "diff", PG[[1]], PG[[2]])
+SPGdiff.lm.RMSE  <- doLM(SPG[[3]], SPG[[4]], "SPG", "RMSE", "diff", SPG[[1]], SPG[[2]])
+VZdiff.lm.RMSE   <- doLM(VZ[[3]], VZ[[4]], "VZ", "RMSE", "diff", VZ[[1]], VZ[[2]])
+XOMdiff.lm.RMSE  <- doLM(XOM[[3]], XOM[[4]], "XOM", "RMSE", "diff", XOM[[1]], XOM[[2]])
+
+print(Sys.time() - startOverall)
+```
+
+An example of what the plotted outputs look like as generated by *doLM* is as follows (JPM,differenced,RMSE results shown).
+
+![JPM, Differenced, RMSE LM Model Evaluation Output](LMplots_JPM_RMSE.pdf){width=800px height=800px}
+
+### Sentiment Model Comparisons
+Finally, after generating all models (takes about 9 hours of runtime after thorough debug), I proceeded with model comparison. To do this, I staged each ticker's models' metrics against one another for review. This was done a few different ways. First, resamples used during the cross-validation stage of each model's development were gathered and the cross-validation R-squared, RMSE, and MAE values were compared graphically for each model per ticker. Second, all metrics calculated during model development using both training and prediction data were combined into a dataframe for each model per ticker for review and comparison. Third, because reviewing so many performance metric values at once was rather overwhelming, I created a ranked dataframe in which each model per ticker is ranked from 1 to 12 (since there were 12 models produced per ticker) to produce a ranking of the models from best (1) to worst (12) using just training data metrics (*rank.train*), using just prediction metrics (*rank.pred*), and then using all metrics combined (*rank.overall*). Both a combined metrics table and combined ranks table including all tickers were output for final evaluation in Tableau as will be described later.
+
+All the above functionalities were wrapped into a function, *compareMods*, as shown below. It's also worth mentioning that since many of the models struggled to predict on unforeseen data (my prediction datasets) given the very short training duration of three weeks (again, because of StockTwits, Twitter, and Yahoo Finance data availability), many of the prediction R-squared values were negative. Therefore, I chose to make R-squared prediction values *NA* during the ranking phase. I also chose to treat ties by applying the minimum rank value. So in the case of having one model come in first, another come in second, but then the next two tieing with the same metric values, these third and fourth models would both receive a rank of 3 and then the fifth model would receive a rank of 5. In this example, there would be no model ranked as 4 since two were tied for 3.
+
+As before, plots produced by *compareMods* are written to PDF. The PDF file prefix for these is *Comparison_*.
+
+```{r}
+## Compare models for each ticker graphically
+compareMods <- function(pat){
+    pdf(paste0('Comparison_', pat, '.pdf'))
+    
+    ## Get resample results for each model
+    modList <- ls(pattern = paste0(pat,"."), envir=.GlobalEnv)
+    if(pat == 'PG') modList <- modList[!grepl('^SPG', modList)]
+    comp <- lapply(modList, function(x) get(x)[[1]])
+    names(comp) <- modList
+    comp <- resamples(comp)
+    
+    ## Compare metrics of resample results
+    trellis.par.set(caretTheme())
+    print(dotplot(comp, metric = "Rsquared", main = "Sentiment Model Review - R^2"))
+    print(dotplot(comp, metric = "RMSE", main = "Sentiment Model Review - RMSE"))
+    print(dotplot(comp, metric = "MAE", main = "Sentiment Model Review - MAE"))
+    
+    ## Compare and rank overall metrics
+    modInfo <- data.frame(model.name = character(), ticker = character(), r2.train = numeric(),
+                          r2.pred = numeric(), mse.train = numeric(), mse.pred = numeric(),
+                          rmse.train = numeric(), rmse.pred = numeric(), mae.train = numeric(),
+                          mae.pred = numeric(), mape.train = numeric(), mape.pred = numeric())
+    for(m in modList){
+        modInfo  <-  rbind(modInfo, data.frame(model.name = m,
+                                               ticker = strsplit(m, '\\.|d')[[1]][1],
+                                               r2.train = get(m)[[2]][[1]],
+                                               r2.pred = get(m)[[2]][[2]],
+                                               mse.train = get(m)[[3]][[1]],
+                                               mse.pred = get(m)[[3]][[2]],
+                                               rmse.train = get(m)[[4]][[1]],
+                                               rmse.pred = get(m)[[4]][[2]],
+                                               mae.train = get(m)[[5]][[1]],
+                                               mae.pred = get(m)[[5]][[2]],
+                                               mape.train = get(m)[[6]][[1]],
+                                               mape.pred = get(m)[[6]][[2]]))
+    }
+    
+    model.name <- modInfo$model.name
+    ticker <- modInfo$ticker
+    r2.train <- rank(-modInfo$r2.train, ties.method = "min")
+    r2.pred <- NA #NA chosen since prediction rSquared values are wonky
+    mse.train <- rank(modInfo$mse.train, ties.method = "min")
+    mse.pred <- rank(modInfo$mse.pred, ties.method = "min")
+    rmse.train <- rank(modInfo$rmse.train, ties.method = "min")
+    rmse.pred <- rank(modInfo$rmse.pred, ties.method = "min")
+    mae.train <- rank(modInfo$mae.train, ties.method = "min")
+    mae.pred <- rank(modInfo$mae.pred, ties.method = "min")
+    mape.train <- rank(modInfo$mape.train, ties.method = "min")
+    mape.pred <- rank(modInfo$mape.pred, ties.method = "min")
+    
+    ## Make final rankings
+    modRanks <- data.frame(model.name, ticker, r2.train, r2.pred, mse.train, mse.pred,
+                           rmse.train, rmse.pred, mae.train, mae.pred, mape.train, mape.pred)
+    modRanks$rank.overall <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE),
+                                  ties.method = "min")
+    modRanks$rank.train <- rank(rowSums(modRanks[,c(3,5,7,9,11)], na.rm = TRUE),
+                                ties.method = "min")
+    modRanks$rank.pred <- rank(rowSums(modRanks[,c(4,6,8,10,12)], na.rm = TRUE),
+                               ties.method = "min")
+    
+    
+    ## Write to global variables
+    assign(paste0('Comparison.', pat), modInfo, envir=.GlobalEnv)
+    assign(paste0('Ranks.', pat), modRanks, envir=.GlobalEnv)
+    
+    on.exit(dev.off())
+    
+    return(comp)
+}
+```
+
+The above *compareMods* function is called for each individual ticker, thus creating a metrics and rank table for each.
+
+```{r}
+## Compare models for each ticker
+compareMods('AAPL')
+compareMods('AMZN')
+compareMods('BA')
+compareMods('DWDP')
+compareMods('JNJ')
+compareMods('JPM')
+compareMods('NEE')
+compareMods('PG')
+compareMods('SPG')
+compareMods('VZ')
+compareMods('XOM')
+```
+
+Example metric and rank outputs for one of the tickers is provided below (JPM again for consistency). Note that while the metrics table can be overwhelming, letting R do the ranking for me makes my job of working through model performance comparisons much easier. My final evaluation for the paper and presentation was performed after outputting such data for each ticker to Tableau for easier review.
+
+```{r}
+Comparison.JPM
+Ranks.JPM
+```
+
+![JPM, Differenced, RMSE Model Comparisons on Resampled Results](Comparison_JPM.pdf){width=800px height=800px}
+
+The above comparison and ranking results, along with feature importance rankings for random forest and XGBoost and coefficients and confidence intervals for multiple linear regression, were finally output to Tableau for final model review. In all cases, all data were combined among all tickers such that only four tables were output to Tableau. A ticker column was added to support filtering each dataset by ticker using Tableau's filters. My code to generate these outputs is as follows.
+
+```{r}
+## Output data for visualization in Tableau
+allTickDF <- rbind(AAPL[[1]], AAPL[[2]]) #First, output non-diffed price and scores
+allTickDF$highDiff <- c(AAPL[[3]][[ncol(AAPL[[3]])]], AAPL[[4]][[ncol(AAPL[[4]])]])
+allTickDF$ticker <- 'AAPL'
+ticks10 <- c('AMZN', 'BA', 'DWDP', 'JNJ', 'JPM', 'NEE', 'PG', 'SPG', 'VZ', 'XOM')
+for(t in ticks10){
+    temp <- rbind(get(t)[[1]], get(t)[[2]])
+    temp$highDiff <- c(get(t)[[3]][[ncol(get(t)[[3]])]], get(t)[[4]][[ncol(get(t)[[4]])]])
+    temp$ticker <- t
+    allTickDF <- rbind(allTickDF, temp)
+}
+rm(t, temp, ticks10)
+write.csv(allTickDF, 'Data/Tableau/allTickDF.csv', row.names = FALSE)
+
+## Output feature importance where available
+featureRank <- data.frame(model = character(), ticker = character(), feature = character(),
+                          importance = numeric())
+decTrees <- ls(pattern = '.xgb.|.rf.')
+for (m in decTrees){
+    if(!is.na(get(m)[length(get(m))])){
+        temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
+                           feature = row.names(get(m)[[length(get(m))]][[1]]),
+                           importance = get(m)[[length(get(m))]][[1]])
+        featureRank <- rbind(featureRank, temp)
+    }
+}
+rm(m, temp, decTrees)
+write.csv(featureRank, 'Data/Tableau/featureRank.csv', row.names = FALSE)
+
+## Output coefficients and confidence intervals where available
+coeffConfs <- data.frame(model = character(), ticker = character(), variable = character(),
+                          coeff = numeric(), confInt.Lower = numeric(), confInt.Upper = numeric())
+linMods <- ls(pattern = '.lm.')
+for (m in linMods){
+    if(!is.na(get(m)[length(get(m))])){
+        temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
+                           variable = names(get(m)[[length(get(m))-1]]),
+                           coeff = get(m)[[length(get(m))-1]],
+                           confInt.Lower = get(m)[[length(get(m))]][,1],
+                           confInt.Upper = get(m)[[length(get(m))]][,2])
+        coeffConfs <- rbind(coeffConfs, temp)
+    }
+}
+rm(m, temp, linMods)
+write.csv(coeffConfs, 'Data/Tableau/coeffConfs.csv', row.names = FALSE)
+
+## Output metric and ranking tables
+comps <- ls(pattern = '^Comparison\\.')
+modelMetrics <- get(comps[1])
+for(c in comps[-1]){
+    modelMetrics <- rbind(modelMetrics, get(c))
+}
+rm(comps, c)
+write.csv(modelMetrics, 'Data/Tableau/modelMetrics.csv', row.names = FALSE)
+
+rankings <- ls(pattern = '^Ranks\\.')
+modelRanks <- get(rankings[1])
+for(r in rankings[-1]){
+    modelRanks <- rbind(modelRanks, get(r))
+}
+rm(rankings, r)
+write.csv(modelRanks, 'Data/Tableau/modelRanks.csv', row.names = FALSE)
+```

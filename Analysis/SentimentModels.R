@@ -107,6 +107,7 @@ mergeSentiment <- function(df, tick){
     tickSent.train <- tickSent.train[tickSent.train$date > "2018-02-26" & tickSent.train$date <= "2018-04-04",] #Incomplete sentiment data before 2-26-18
     tickSent.train[is.na(tickSent.train)] <- 0 #Fill any NA sentiment scores with 0
     colnames(tickSent.train) <- gsub(x = colnames(tickSent.train), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
+    tickSent.train <- tickSent.train[with(tickSent.train, order(date, hour)),]
     
     ## Create prediction dataset next
     tickSent.pred <- merge(tickSent, df[, c("date",
@@ -120,7 +121,7 @@ mergeSentiment <- function(df, tick){
     tickSent.pred <- tickSent.pred[tickSent.pred$date > "2018-04-04" & tickSent.pred$date <= "2018-04-13",] #20% of data set aside for predictions
     tickSent.pred[is.na(tickSent.pred)] <- 0 #Fill any NA sentiment scores with 0
     colnames(tickSent.pred) <- gsub(x = colnames(tickSent.pred), pattern = "-", replacement = "N") #randomForest function doesn't like '-' in colnames
-
+    tickSent.pred <- tickSent.pred[with(tickSent.pred, order(date, hour)),]
     
     return(list(tickSent.train, tickSent.pred))
 }
@@ -260,6 +261,21 @@ doRF <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
 }
 
 startOverall <- Sys.time() #Start Overall timer
+
+## Predict 'close'
+setup_close <- function(){
+    notResponse <- c("close.diff", "return.percent", "volatility", "volatility.diff")
+    assign("AAPL.train", AAPL[[1]][,!(names(AAPL[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("AAPL.pred", AAPL[[2]][,!(names(AAPL[[2]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.train", XOM[[1]][,!(names(XOM[[1]]) %in% notResponse)], envir=.GlobalEnv)
+    assign("XOM.pred", XOM[[2]][,!(names(XOM[[2]]) %in% notResponse)], envir=.GlobalEnv)
+}
+setup_close()
+
+AAPL.close.rf.Rsquared <- doRF(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "Rsquared")
+XOM.close.rf.Rsquared <- doRF(XOM.train, XOM.pred, "XOM", "close", close ~ ., "Rsquared")
+AAPL.close.rf.RMSE <- doRF(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "RMSE")
+XOM.close.rf.RMSE <- doRF(XOM.train, XOM.pred, "XOM", "close", close ~ ., "RMSE")
 
 ## Predict 'close.diff'
 setup_close.diff <- function(){
@@ -472,6 +488,14 @@ doXGB <- function(train.df, pred.df, tick, response, metric, xform = "", orig.tr
  
 startOverall <- Sys.time() #Start Overall timer
 
+## Predict 'close'
+setup_close()
+
+AAPL.close.xgb.Rsquared <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close", "Rsquared")
+XOM.close.xgb.Rsquared <- doXGB(XOM.train, XOM.pred, "XOM", "close", "Rsquared")
+AAPL.close.xgb.RMSE <- doXGB(AAPL.train, AAPL.pred, "AAPL", "close", "RMSE")
+XOM.close.xgb.RMSE <- doXGB(XOM.train, XOM.pred, "XOM", "close", "RMSE")
+
 ## Predict 'close.diff'
 setup_close.diff()
 
@@ -629,6 +653,14 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
 }
 
 startOverall <- Sys.time() #Start Overall timer
+
+## Predict 'close'
+setup_close()
+
+AAPL.close.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "Rsquared")
+XOM.close.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "close", close ~ ., "Rsquared")
+AAPL.close.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "RMSE")
+XOM.close.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "close", close ~ ., "RMSE")
 
 ## Predict 'close.diff'
 setup_close.diff()
@@ -795,6 +827,14 @@ doGAM <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
 
 startOverall <- Sys.time() #Start Overall timer
 
+## Predict 'close'
+setup_close()
+
+AAPL.close.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "Rsquared")
+XOM.close.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "close", close ~ ., "Rsquared")
+AAPL.close.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "RMSE")
+XOM.close.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "close", close ~ ., "RMSE")
+
 ## Predict 'close.diff'
 setup_close.diff()
 
@@ -950,4 +990,6 @@ for(r in rankings[-1]){
     modelRanks <- rbind(modelRanks, get(r))
 }
 rm(rankings, r)
+#Following application of sapply inspired by https://stackoverflow.com/questions/2803460/how-to-get-the-second-sub-element-of-every-element-in-a-list?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
+modelRanks$response <- sapply(strsplit(as.character(modelRanks$model.name), "\\."), "[[", 2)
 write.csv(modelRanks, 'Data/Tableau/modelRanks.csv', row.names = FALSE)

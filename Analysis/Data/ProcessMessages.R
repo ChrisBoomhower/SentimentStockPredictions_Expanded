@@ -19,7 +19,7 @@ Tableau = FALSE #Set conditional term for processing word dataframes
 ###### DATA CONSOLIDATION #######
 #################################
 
-# ## Consolidate StockTwits ticker symbol data into single dataframes with duplicates dropped
+## Consolidate StockTwits ticker symbol data into single dataframes with duplicates dropped
 setwd("C:/Users/Owner/Documents/GitHub/MSDS_8390/SentimentVsTraditional_StockPrediction/Analysis/Data/StockTwits")
 #ST.tickers <- list.files(pattern = '[^getStockTwits.R|getStockTwits.bat|getStockTwits.Rout]')
 ST.tickers <- c("AAPL", "XOM")
