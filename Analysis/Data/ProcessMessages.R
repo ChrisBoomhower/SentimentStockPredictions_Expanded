@@ -156,136 +156,6 @@ print(Sys.time() - start)
 # sent <- sentiment_by(mytext, polarity_dt = modKey) #Specify modified polarity key
 
 
-# #################################
-# ####### SCORING FUNCTIONS #######
-# #################################
-# 
-# ## Get good and bad words
-# ## See Minqing Hu and Bing Liu papers titled,
-# ## "Mining and Summarizing Customer Reviews" and
-# ## "Opinion Observer: Analyzing and Comparing Opinions on the Web,"
-# setwd("..")
-# positive = scan('positive-words.txt', what='character', comment.char=';') #Produce good word vector
-# negative = scan('negative-words.txt', what='character', comment.char=';') #Produce negative word vector
-# 
-# positive = c(positive, 'wtf', 'epicfail', 'bearish', 'bear')
-# negative = c(negative, 'upgrade', ':)', 'bullish', 'bull')
-# 
-# ## Following function modified from https://github.com/jeffreybreen/twitter-sentiment-analysis-tutorial-201107/blob/master/R/sentiment.R
-# make.score <- function(sentence, pos.words, neg.words) {
-#     
-#     ## clean up sentence contents:
-#     sentence = gsub('[[:punct:]]', '', sentence)
-#     sentence = gsub('[[:cntrl:]]', '', sentence)
-#     sentence = gsub('\\d+', '', sentence)
-#     
-#     ## convert to lower case:
-#     sentence = try(tolower(sentence))
-#     
-#     ## split into words and reduce list of single list object to just list
-#     word.list = str_split(sentence, '\\s+')
-#     words = unlist(word.list)
-#     
-#     ## compare message words against good and bad word dictionaries
-#     pos.matches = match(words, pos.words)
-#     neg.matches = match(words, neg.words)
-#     
-#     ## get indices of matched terms
-#     pos.matches = !is.na(pos.matches)
-#     neg.matches = !is.na(neg.matches)
-#     
-#     ## calculate score based on summations
-#     score = sum(pos.matches) - sum(neg.matches)
-#     
-#     #if(cloud) return(list(words, pos.matches, neg.matches)) #Use when generating df for Tableau wordcloud
-#     #else return(score) #Use when getting scores
-#     return(score)
-# }
-# 
-# score.sentiment = function(sentences, pos.words, neg.words, feed, addition = '', .progress='none'){
-#     if(feed == 'ST'){
-#         sentences <- ifelse(addition == '', sentences, paste(sentences, addition)) #Tag on additional column content when needed
-#     }
-#     sentences <- try(iconv(sentences, 'UTF-8', 'latin1')) #Inspired by https://stackoverflow.com/questions/9637278/r-tm-package-invalid-input-in-utf8towcs
-# 
-#     # we got a vector of sentences. plyr will handle a list or a vector as an "l" for us
-#     # we want a simple array of scores back, so we use "l" + "a" + "ply" = laply:
-#     scores = laply(sentences, make.score, pos.words, neg.words, .progress=.progress )
-#     
-#     scores.df = data.frame(score=scores, text=sentences)
-#     return(scores.df)
-# }
-# 
-# #################################
-# ######## GENERATE SCORES ########
-# #################################
-# 
-# ## Generate StockTwits scores
-# ST <- ls(pattern = '.\\.ST$') #Get list of StockTwits objects
-# for(s in ST){
-#     temp <- score.sentiment(get(s)[["body"]], positive, negative, feed = 'ST',
-#                             addition = get(s)[["entities.sentiment.basic"]],
-#                             .progress='text')
-# 
-#     ## Multiply score by likes.total and add score column to social dataframes
-#     assign(paste0(s,".scores"), temp)
-#     assign(s, `[[<-`(get(s), 'scoreLikes', #New variable assignment syntax inspired by https://stackoverflow.com/questions/15670193/how-to-use-assign-or-get-on-specific-named-column-of-a-dataframe
-#                      value =ifelse(get(s)[["likes.total"]] > 0,
-#                                    temp[,1] * get(s)[["likes.total"]],
-#                                    temp[,1])))
-# 
-#     ## Also add raw scores to social dataframes
-#     assign(s, `[[<-`(get(s), 'score', #New variable assignment syntax inspired by https://stackoverflow.com/questions/15670193/how-to-use-assign-or-get-on-specific-named-column-of-a-dataframe
-#                      value =temp[,1]))
-# }
-# rm(temp)
-# 
-# #FOLLOWING LINE FOR DEBUG ONLY
-# #temp <- score.sentiment(AAPL.ST[["body"]], positive, negative, addition = AAPL.ST[,"entities.sentiment.basic"], .progress='text')
-# 
-# ## Generate Twitter scores
-# Tw <- ls(pattern = '.\\.T$') #Get list of Twitter objects
-# start <- Sys.time() #Start timer
-# for(s in Tw){
-#     temp <- score.sentiment(get(s)[["text"]], positive, negative,
-#                             feed = "Tw", addition = "",
-#                             .progress='text')
-# 
-#     ## Multiply score by likes.total and add score column to social dataframes
-#     assign(paste0(s,".scores"), temp)
-#     assign(s, `[[<-`(get(s), 'scoreLikes',
-#                      value =ifelse(get(s)[["favoriteCount"]] > 0,
-#                                    temp[,1] * get(s)[["favoriteCount"]],
-#                                    temp[,1])))
-# 
-#     ## Also add raw scores to social dataframes
-#     assign(s, `[[<-`(get(s), 'score',
-#                      value =temp[,1]))
-# }
-# rm(temp)
-# print(Sys.time() - start)
-# 
-# #FOLLOWING LINE FOR DEBUG ONLY
-# #temp <- score.sentiment(AAPL.T[["text"]], positive, negative, feed = "Tw", .progress='text')
-# 
-# ## Generate Yahoo Finance scores
-# YF <- ls(pattern = '.\\.YF$') #Get list of Twitter objects
-# start <- Sys.time() #Start timer
-# for(s in YF){
-#     temp <- score.sentiment(get(s)[["description"]], positive, negative,
-#                             feed = "YF", addition = "",
-#                             .progress='text')
-#     
-#     ## Add raw scores to social dataframes
-#     assign(s, `[[<-`(get(s), 'score',
-#                      value =temp[,1]))
-# }
-# rm(temp)
-# print(Sys.time() - start)
-# 
-# #FOLLOWING LINE FOR DEBUG ONLY
-# #temp <- score.sentiment(AAPL.YF[["description"]], positive, negative, feed = "YF", addition = "", .progress='text')
-
 ###########################################
 ####### Generate and Combine Scores #######
 ###########################################
@@ -318,12 +188,15 @@ combineSent <- function(ST.t, Tw.t, YF.t){
     ST.small$message = gsub('^[:space:]+|[:space:]+$', "", ST.small$message)
     ST.small$message = gsub("\\$", "#", ST.small$message) #Use for StockTwits
     ## Generate StockTwits sentiment
+    msgCount <- count(ST.small, c("date", "hour")) #Count messages by date/hour
     mytext <- get_sentences(ST.small$message)
     sent <- with(ST.small,
                  sentiment_by(mytext,
                               list(date, hour),
                               polarity_dt = modKey)) #Specify modified polarity key
-    ST.small <- sent[, c("date", "hour", "ave_sentiment")]
+    sent <- merge(sent, msgCount, by = c("date", "hour"))
+    sent$sentX <- sent$ave_sentiment * sent$freq #Multiply average sentiment by number of messages per date/hour
+    ST.small <- sent[, c("date", "hour", "sentX")]
     colnames(ST.small) <- c("date", "hour", "ST.score")
     ## Add placeholders for hours during which no messages were posted
     ST.small <- ST.small[with(ST.small, order(date, hour)),]
@@ -353,12 +226,15 @@ combineSent <- function(ST.t, Tw.t, YF.t){
     T.small$message <- gsub("&#39;", "'", T.small$message)
     T.small$message = gsub('^[:space:]+|[:space:]+$', "", T.small$message)
     ## Generate Twitter sentiment
+    msgCount <- count(T.small, c("date", "hour")) #Count messages by date/hour
     mytext <- get_sentences(T.small$message)
     sent <- with(T.small,
                  sentiment_by(mytext,
                               list(date, hour),
                               polarity_dt = modKey)) #Specify modified polarity key
-    T.small <- sent[, c("date", "hour", "ave_sentiment")]
+    sent <- merge(sent, msgCount, by = c("date", "hour"))
+    sent$sentX <- sent$ave_sentiment * sent$freq #Multiply average sentiment by number of messages per date/hour
+    T.small <- sent[, c("date", "hour", "sentX")]
     colnames(T.small) <- c("date", "hour", "T.score")
     ## Add placeholders for hours during which no messages were posted
     T.small <- T.small[with(T.small, order(date, hour)),]
@@ -386,11 +262,14 @@ combineSent <- function(ST.t, Tw.t, YF.t){
     YF.small$message <- replace_html(YF.small$message)
     YF.small$message <- gsub("&#39;", "'", YF.small$message)
     ## Generate Yahoo Finance sentiment
+    msgCount <- count(YF.small, c("date", "hour")) #Count messages by date/hour
     mytext <- get_sentences(YF.small$message)
     sent <- with(YF.small,
                  sentiment_by(mytext,
                               list(date, hour),
                               polarity_dt = modKey)) #Specify modified polarity key
+    sent <- merge(sent, msgCount, by = c("date", "hour"))
+    sent$sentX <- sent$ave_sentiment * sent$freq #Multiply average sentiment by number of messages per date/hour
     YF.small <- sent[, c("date", "hour", "ave_sentiment")]
     colnames(YF.small) <- c("date", "hour", "YF.score")
     ## Add placeholders for hours during which no messages were posted
