@@ -882,12 +882,18 @@ for(m in ls(pattern = '\\.gam\\.')){
 ######### Compare Sentiment Models ########
 ###########################################
 
+## Load saved models from RDS files
+mods <- list.files(path = "Data/ModelRDS/")
+for(m in mods){
+    assign(m, readRDS(paste0("Data/ModelRDS/", m)))
+}
+
 ## Compare models for each ticker graphically
 compareMods <- function(pat, response){
     pdf(paste0('Comparison_', pat, response, '.pdf'))
 
     ## Get resample results for each model
-    modList <- ls(pattern = paste0("^", pat, ".", response), envir=.GlobalEnv)
+    modList <- ls(pattern = paste0("^", pat, "\\.", response, "\\."), envir=.GlobalEnv)
     if(pat == 'PG') modList <- modList[!grepl('^SPG', modList)]
     comp <- lapply(modList, function(x) get(x)[[1]])
     names(comp) <- modList
@@ -940,9 +946,11 @@ compareMods <- function(pat, response){
 }
 
 ## Compare models for each ticker
+compareMods('AAPL', 'close')
 compareMods('AAPL', 'closediff')
 compareMods('AAPL', 'returnpercent')
 compareMods('AAPL', 'volatilitydiff')
+compareMods('XOM', 'close')
 compareMods('XOM', 'closediff')
 compareMods('XOM', 'returnpercent')
 compareMods('XOM', 'volatilitydiff')
