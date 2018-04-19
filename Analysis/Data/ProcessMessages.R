@@ -110,51 +110,6 @@ rm(df)
 rm(dat_list)
 print(Sys.time() - start)
 
-# ## Modify 'bullish'/'bearish' sentiment
-# modKey <- update_key(lexicon::hash_sentiment_jockers_rinker,
-#                      drop = c("bullish", "bull", "bearish"),
-#                      x = data.frame(x = c("bullish", "bull", "bearish", "bear"), y = c(1,1,-1,-1)))
-# 
-# #StockTwits test
-# ST <- ls(pattern = '.\\.ST$') #Get list of StockTwits objects
-# AAPL.ST.mod <- AAPL.ST
-# AAPL.ST.mod$body <- gsub("http[^[:blank:]]+", "", AAPL.ST.mod$body)
-# AAPL.ST.mod$body = gsub("@[A-Za-z0-9_:]+", "", AAPL.ST.mod$body)
-# AAPL.ST.mod$body <- replace_emoticon(AAPL.ST.mod$body)
-# AAPL.ST.mod$body <- replace_html(AAPL.ST.mod$body)
-# AAPL.ST.mod$body <- gsub("&#39;", "'", AAPL.ST.mod$body)
-# AAPL.ST.mod$body = gsub('^[:space:]+|[:space:]+$', "", AAPL.ST.mod$body)
-# AAPL.ST.mod$body = gsub("\\$", "#", AAPL.ST.mod$body) #Use for StockTwits
-# mytext <- get_sentences(AAPL.ST.mod$body)
-# sent <- sentiment_by(mytext, polarity_dt = modKey) #Specify modified polarity key
-# View(cbind(AAPL.ST$body, AAPL.ST.mod$body, sent$ave_sentiment))
-# 
-# sentiment_by(mytext, list(person, time))
-# 
-# out <- with(mytext, sentiment_by(get_sentences(dialogue), list(person, time)))
-# 
-# ## Twitter test
-# Tw <- ls(pattern = '.\\.T$') #Get list of Twitter objects
-# test.xom <- gsub("http[^[:blank:]]+", "", AAPL.T$text)
-# test2.xom = gsub("@[A-Za-z0-9_:]+", "", test.xom)
-# test3.xom = gsub("^RT","",test2.xom) #Use for Twitter
-# test4.xom <- replace_emoticon(test3.xom)
-# test5.xom <- replace_html(test4.xom)
-# test6.xom <- gsub("&#39;", "'", test5.xom)
-# test7.xom = gsub('^[:space:]+|[:space:]+$', "", test6.xom)
-# #test8.xom = gsub("#", "", test7.xom) #Use for Twitter --> actually chose to leave hashtag symbol
-# mytext <- get_sentences(test7.xom)
-# sent <- sentiment_by(mytext, polarity_dt = modKey) #Specify modified polarity key
-# 
-# ## Yahoo Finance test
-# YF <- ls(pattern = '.\\.YF$') #Get list of Twitter objects
-# test.xom <- gsub("http[^[:blank:]]+", "", AAPL.YF$description)
-# test2.xom = gsub("@", "", test.xom)
-# test3.xom <- replace_html(test2.xom)
-# test4.xom <- gsub("&#39;", "'", test3.xom)
-# mytext <- get_sentences(test4.xom)
-# sent <- sentiment_by(mytext, polarity_dt = modKey) #Specify modified polarity key
-
 
 ###########################################
 ####### Generate and Combine Scores #######
@@ -188,15 +143,12 @@ combineSent <- function(ST.t, Tw.t, YF.t){
     ST.small$message = gsub('^[:space:]+|[:space:]+$', "", ST.small$message)
     ST.small$message = gsub("\\$", "#", ST.small$message) #Use for StockTwits
     ## Generate StockTwits sentiment
-    msgCount <- count(ST.small, c("date", "hour")) #Count messages by date/hour
     mytext <- get_sentences(ST.small$message)
     sent <- with(ST.small,
                  sentiment_by(mytext,
                               list(date, hour),
                               polarity_dt = modKey)) #Specify modified polarity key
-    sent <- merge(sent, msgCount, by = c("date", "hour"))
-    sent$sentX <- sent$ave_sentiment * sent$freq #Multiply average sentiment by number of messages per date/hour
-    ST.small <- sent[, c("date", "hour", "sentX")]
+    ST.small <- sent[, c("date", "hour", "ave_sentiment")]
     colnames(ST.small) <- c("date", "hour", "ST.score")
     ## Add placeholders for hours during which no messages were posted
     ST.small <- ST.small[with(ST.small, order(date, hour)),]
@@ -226,15 +178,12 @@ combineSent <- function(ST.t, Tw.t, YF.t){
     T.small$message <- gsub("&#39;", "'", T.small$message)
     T.small$message = gsub('^[:space:]+|[:space:]+$', "", T.small$message)
     ## Generate Twitter sentiment
-    msgCount <- count(T.small, c("date", "hour")) #Count messages by date/hour
     mytext <- get_sentences(T.small$message)
     sent <- with(T.small,
                  sentiment_by(mytext,
                               list(date, hour),
                               polarity_dt = modKey)) #Specify modified polarity key
-    sent <- merge(sent, msgCount, by = c("date", "hour"))
-    sent$sentX <- sent$ave_sentiment * sent$freq #Multiply average sentiment by number of messages per date/hour
-    T.small <- sent[, c("date", "hour", "sentX")]
+    T.small <- sent[, c("date", "hour", "ave_sentiment")]
     colnames(T.small) <- c("date", "hour", "T.score")
     ## Add placeholders for hours during which no messages were posted
     T.small <- T.small[with(T.small, order(date, hour)),]
@@ -262,14 +211,11 @@ combineSent <- function(ST.t, Tw.t, YF.t){
     YF.small$message <- replace_html(YF.small$message)
     YF.small$message <- gsub("&#39;", "'", YF.small$message)
     ## Generate Yahoo Finance sentiment
-    msgCount <- count(YF.small, c("date", "hour")) #Count messages by date/hour
     mytext <- get_sentences(YF.small$message)
     sent <- with(YF.small,
                  sentiment_by(mytext,
                               list(date, hour),
                               polarity_dt = modKey)) #Specify modified polarity key
-    sent <- merge(sent, msgCount, by = c("date", "hour"))
-    sent$sentX <- sent$ave_sentiment * sent$freq #Multiply average sentiment by number of messages per date/hour
     YF.small <- sent[, c("date", "hour", "ave_sentiment")]
     colnames(YF.small) <- c("date", "hour", "YF.score")
     ## Add placeholders for hours during which no messages were posted
