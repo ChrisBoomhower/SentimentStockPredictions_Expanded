@@ -1123,271 +1123,486 @@ for(m in ls(pattern = '\\.xgb\\.')){
 }
 ```
 
+#### k-Nearest-Neighbors Regression Model
+Again, the same methodology of timeslice cross-validation was used to train my kNN models in *doKNN*. Similar to the RF and XGB models, hyper-parameter tuning was performed to identify the model configuration which produces the best model. The parameter tuned in this case was *k*, representative of the number of neighbors to be used in model generation. As was done previously, R-squared, MSE, RMSE, MAE, and MAPE metrics were calculated for both cross-validated training data and prediction data, and visual R-squared evaluation plots and actual vs. predicted stock closing prices, differenced closing prices, percent returns, and differenced volatility were plotted to PDF for both training and prediction datasets (See *KNNplots_* prefixed PDFs). Finally, feature importance rankings were captured for later review in Tableau.
 
-
-#### Multiple Linear Regression Model
-The last type of model developed is the multiple linear regression model. Since my predictor variables are all lagged score values (with the exception of the *hour* variable), I can already expect co-correlation and covariance issues up front in my datasets. Therefore, I account for these immediately in the *doLM* function by dropping lagged variables which portray collinearity. As mentioned previously, since lagged variables were created before merging in stock data and non-trade hour observations were dropped upon merge, lagged columns will not all contain the same sequence of sentiment values. Therefore, while some lagged variables do portray collinearity, not all do. Those that do not are kept and used for modeling.
-
-The same process of timeslice cross-validation was used during multiple linear regression training. Unlike random forest and XGBoost, however, linear regression does not have parameters which may be used for tuning. After training, the same metrics were calculated and plots of R-squared evaluation and cross-validated training performance and prediction performance were plotted to PDF (See *LMplots_* prefixed PDFs). Model coefficients and confidence intervals were also set aside in case I'd like to review them later.
+A key difference in how this model type was developed vs. the other models in my analysis is that I scaled all predictor and response variables during kNN model generation. This was necessary given kNN's assessment of node distance to construct its regression model. Though I've left all stock measure plots and predictions in their scaled form, they still depict the same patterns and characteristics as their unscaled originators, just with scaled values instead.
 
 ```{r}
-doLM <- function(train.df, pred.df, tick, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df){
-    tryCatch({    
+doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
+                  orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
+    tryCatch({
         ## Write outputs to external files for later review
-        sink(paste0("doLM_", tick, xform, "_", metric, ".txt"))
-        pdf(paste0('LMplots_',tick, xform, "_", metric, '.pdf'))
+        par(mfrow=c(1,1))
+        sink(paste0("doKNN_", tick, response, "_", metric, ".txt"))
+        warningOut <- file(paste0("Warnings/doKNN_", tick, response, "_", metric, "_warnings.txt"), open="wt")
+        sink(warningOut, type = "message")
+        pdf(paste0('KNNplots_',tick, response, '_', metric, '.pdf'))
         
         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
         ## Setup data
         cols <- colnames(train.df)
         cols <- cols[!cols %in% "date"]
         
-        X.train <- train.df[,cols]
-        X.test <- pred.df[,cols]
-        Y.train <- train.df$high
-        Y.test <- pred.df$high
+        ## Preprocess data used during evaluation
+        pp.train.df <- preProcess(train.df, method = c("center", "scale"))
+        pp.train.df <- predict(pp.train.df, train.df)
+        pp.pred.df <- preProcess(pred.df, method = c("center", "scale"))
+        pp.pred.df <- predict(pp.pred.df, pred.df)
+        pp.orig.train.df <- preProcess(orig.train.df, method = c("center", "scale"))
+        pp.orig.train.df <- predict(pp.orig.train.df, orig.train.df)
+        pp.orig.pred.df <- preProcess(orig.pred.df, method = c("center", "scale"))
+        pp.orig.pred.df <- predict(pp.orig.pred.df, orig.pred.df)
         
-        ## Check for and remove collinearity between variables
-        repeat{
-            lc <- findLinearCombos(X.train[,!(colnames(X.train) %in% "high")])
-            if(!is.null(lc$remove)){
-                X.train <- X.train[,-lc$remove]
-                X.test <- X.test[,-lc$remove]
-            }
-            else break
-        }
-        
-        ## Create seed
+        ## Create kNN Seeds
+        # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
         set.seed(123)
+        seeds <- vector(mode = "list", length = 79) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:78) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[79]] <- sample.int(1000, 1)
         
         ## Setup training parameters
-        ts.control <- trainControl(method="timeslice", initialWindow = 35, horizon = 14, fixedWindow = FALSE, allowParallel = TRUE) #35 day cv training, 14 day cv testing
-        tuneLength.num <- 2
-        #metric <- "RMSE"
+        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7,
+                                   fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds,
+                                   search = "grid") #98 hour initial cv training, 7 hour cv testing
+        tuneGridKNN <- expand.grid(k=c(1:72))
         
         ## Perform training
         start <- Sys.time() #Start timer
-        lm.mod <- train(high ~ ., data = X.train,
-                        method = "lm",
-                        metric = metric,
-                        trControl = ts.control,
-                        tuneLength=tuneLength.num)
+        knn <- train(formula, data = train.df[,cols], method = "knn", metric = metric,
+                     trControl = ts.control, tuneGrid = tuneGridKNN, importance=TRUE, preProcess = c("center", "scale"))
         print(Sys.time() - start)
-        cat("\nRF Output\n")
-        print(lm.mod)
+        
+        cat("\nKNN Output\n")
+        print(knn)
+        print(plot(knn))
         
         ## Evaluate metrics
-        r2.train <- rSquared(train.df$high, train.df$high - predict(lm.mod, train.df[,cols]))
-        r2.pred <- rSquared(pred.df$high, pred.df$high - predict(lm.mod, pred.df[,cols]))
-        mse.train <- mean((train.df$high - predict(lm.mod, train.df[,cols]))^2)
-        mse.pred <- mean((pred.df$high - predict(lm.mod, pred.df[,cols]))^2)
+        r2.train <- rSquared(pp.train.df[,response], pp.train.df[,response] - scale(predict(knn, train.df[,cols])))
+        r2.pred <- rSquared(pp.pred.df[,response], pp.pred.df[,response] - scale(predict(knn, pred.df[,cols])))
+        mse.train <- mean((pp.train.df[,response] - scale(predict(knn, train.df[,cols])))^2)
+        mse.pred <- mean((pp.pred.df[,response] - scale(predict(knn, pred.df[,cols])))^2)
         rmse.train <- sqrt(mse.train)
         rmse.pred <- sqrt(mse.pred)
-        mae.train <- mean(abs(train.df$high - predict(lm.mod, train.df[,cols])))
-        mae.pred <- mean(abs(pred.df$high - predict(lm.mod, pred.df[,cols])))
-        mape.train <- MAPE(train.df$high, predict(lm.mod, train.df[,cols]))
-        mape.pred <- MAPE(pred.df$high, predict(lm.mod, pred.df[,cols]))
-        
+        mae.train <- mean(abs(pp.train.df[,response] - scale(predict(knn, train.df[,cols]))))
+        mae.pred <- mean(abs(pp.pred.df[,response] - scale(predict(knn, pred.df[,cols]))))
+        mape.train <- MAPE(pp.train.df[,response], scale(predict(knn, train.df[,cols])))
+        mape.pred <- MAPE(pp.pred.df[,response], scale(predict(knn, pred.df[,cols])))
         
         ## Plot Rsquared Evaluation
         p <- ggplot(aes(x=actual, y=pred),
-                    data=data.frame(actual=Y.train, pred=predict(lm.mod, X.train)))
+                    data=data.frame(actual=pp.train.df[,response], pred=scale(predict(knn, train.df[,cols]))))
         print(p + geom_point() +
-            geom_abline(color="red") +
-            ggtitle(paste(tick, "Linear Regression: Training r^2 =", r2.train)))
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "KNN Regression: Training r^2 =", r2.train)))
         
         p <- ggplot(aes(x=actual, y=pred),
-                    data=data.frame(actual=pred.df$high, pred=predict(lm.mod, pred.df[,cols])))
+                    data=data.frame(actual=pp.pred.df[,response], pred=scale(predict(knn, pred.df[,cols]))))
         print(p + geom_point() +
-            geom_abline(color="red") +
-            ggtitle(paste(tick, "Linear Regression: Prediction r^2 =", r2.pred)))
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "KNN Regression: Prediction r^2 =", r2.pred)))
         
         if(xform == "diff"){
             ## Plot trained and predicted performance
-            plot(as.numeric(c(cumsum(c(orig.train.df$high[1], Y.train)),
-                              cumsum(c(orig.pred.df$high[1], Y.test)))),
+            plot(as.numeric(c(cumsum(c(pp.orig.train.df[,orig.response][1], pp.train.df[,response])),
+                              cumsum(c(pp.orig.pred.df[,orig.response][1], pp.pred.df[,response])))),
                  type = "l", lty = 1, xlab = "Date & Hour",
-                 ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n",
-                 main = paste(tick, "LM Performance (Diff): Training + Prediction"))
-            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2,
-                 labels = c(paste(train.df$date, train.df$hour),
-                            paste(pred.df$date, pred.df$hour)),
+                 ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response),
+                 xaxt = "n", main = paste0(tick, " KNN Performance (", response, " scaled): Training + Prediction"))
+            axis(1, at=1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))), labels=FALSE)
+            text(1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))),
+                 par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)),
                  srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-            lines(c(cumsum(c(orig.train.df$high[1], predict(lm.mod, X.train))),
-                    cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test)))),
+            lines(c(cumsum(c(pp.orig.train.df[,orig.response][1], scale(predict(knn, train.df[,cols])))),
+                    cumsum(c(pp.orig.pred.df[,orig.response][1], scale(predict(knn, pred.df[,cols]))))),
                   type = "l", lty = 2, lwd = 2, col = "red")
-            abline(v = length(Y.train)+1, lty = 2, col = "blue")
-    
+            abline(v = length(train.df[,response])+2, lty = 2, col = "blue")
+            
             ## Plot just predicted performance
-            plot(as.numeric(cumsum(c(orig.pred.df$high[1], Y.test))),
+            plot(as.numeric(cumsum(c(pp.orig.pred.df[,orig.response][1], pp.pred.df[,response]))),
                  type = "l", lty = 1, xlab = "Date & Hour",
-                 ylab = "Cumulative Sum of Price[1] and DIff = Price", xaxt = "n",
-                 ylim = c(min(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))),
-                                cumsum(c(orig.pred.df$high[1], Y.test)))),
-                          max(c(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))),
-                                cumsum(c(orig.pred.df$high[1], Y.test))))),
-                 main = paste(tick, "LM Performance (Diff): Prediction"))
-            axis(1, at=1:(length(Y.test)), labels=FALSE)
-            text(1:(length(Y.test)), par("usr")[3] - 0.2,
-                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2,
-                 xpd = TRUE, cex = 0.6, offset = -0.1)
-            lines(cumsum(c(orig.pred.df$high[1], predict(lm.mod, X.test))),
+                 ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response),
+                 xaxt = "n", ylim = c(min(c(cumsum(c(pp.orig.pred.df[,orig.response][1], scale(predict(knn, pred.df[,cols])))),
+                                            cumsum(c(pp.orig.pred.df[,orig.response][1],
+                                                     pp.pred.df[,response])))),
+                                      max(c(cumsum(c(pp.orig.pred.df[,orig.response][1],
+                                                     scale(predict(knn, pred.df[,cols])))),
+                                            cumsum(c(pp.orig.pred.df[,orig.response][1],
+                                                     pp.pred.df[,response]))))),
+                 main = paste0(tick, " KNN Performance (", response, " scaled): Prediction"))
+            axis(1, at=1:(length(pp.pred.df[,response])), labels=FALSE)
+            text(1:(length(pp.pred.df[,response])), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(pp.orig.pred.df[,orig.response][1], scale(predict(knn, pred.df[,cols])))),
                   type = "l", lty = 2, lwd = 2, col = "red")
         }
-        else{
-            ## Plot trained and predicted performance
-            plot(as.numeric(c(Y.train, Y.test)), type = "l", lty = 1,
-                 xlab = "Date & Hour", ylab = "Price", xaxt = "n",
-                 main = paste(tick, "LM Performance: Training + Prediction"))
-            axis(1, at=1:(sum(length(Y.train), length(Y.test))), labels=FALSE)
-            text(1:(sum(length(Y.train), length(Y.test))), par("usr")[3] - 0.2,
-                 labels = c(paste(train.df$date, train.df$hour),
-                            paste(pred.df$date, pred.df$hour)),
-                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-            lines(c(predict(lm.mod, train.df[,cols]),predict(lm.mod, pred.df[,cols])),
-                  type = "l", lty = 2, lwd = 2, col = "red")
-            abline(v = length(Y.train)+1, lty = 2, col = "blue")
-    
-            ## Plot just predicted performance
-            plot(as.numeric(Y.test), type = "l", lty = 1, xlab = "Date & Hour",ylab = "Price",
-                 xaxt = "n", ylim = c(min(c(predict(lm.mod, pred.df[,cols]), Y.test)),
-                                      max(c(predict(lm.mod, pred.df[,cols]), Y.test))),
-                 main = paste(tick, "LM Performance: Prediction"))
-            axis(1, at=1:(length(Y.test)), labels=FALSE)
-            text(1:(length(Y.test)), par("usr")[3] - 0.2,
-                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2,
-                 xpd = TRUE, cex = 0.6, offset = -0.1)
-            lines(predict(lm.mod, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
-        }
-    
-        ## Get coefficients and confidence intervals
-        coeffs <- coef(lm.mod$finalModel)
-        confints <- confint(lm.mod$finalModel)
-        cat("/nCoefficients/n")
-        print(coeffs)
-        cat("/nConfidence Intervals/n")
-        print(confints)
+        
+        ## Plot trained and predicted performance
+        plot(as.numeric(c(pp.train.df[,response], pp.pred.df[,response])), type = "l", lty = 1,
+             xlab = "Date & Hour", ylab = response, xaxt = "n",
+             main = paste0(tick, " KNN Performance (", response, " scaled): Training + Prediction"))
+        axis(1, at=1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))), labels=FALSE)
+        text(1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))), par("usr")[3] - 0.2,
+             labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)),
+             srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+        lines(c(scale(predict(knn, train.df[,cols])),scale(predict(knn, pred.df[,cols]))), type = "l",
+              lty = 2, lwd = 2, col = "red")
+        abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+        
+        ## Plot just predicted performance
+        plot(as.numeric(pp.pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = response,
+             xaxt = "n", ylim = c(min(c(scale(predict(knn, pred.df[,cols])), pp.pred.df[,response])),
+                                  max(c(scale(predict(knn, pred.df[,cols])), pp.pred.df[,response]))),
+             main = paste0(tick, " KNN Performance (", response, " scaled): Prediction"))
+        axis(1, at=1:(length(pp.pred.df[,response])), labels=FALSE)
+        text(1:(length(pp.pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour),
+             srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+        lines(scale(predict(knn, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+        
+        ## Get feature importance
+        feat.imp <- varImp(knn)
+        plot(feat.imp, main = paste(tick, response, "KNN Feature Importance"))
         
         on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
         on.exit(sink(), add = TRUE)
     }, error = function(e){
         on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
         on.exit(sink(), add = TRUE)
-        print(paste(tick, "LM failed"))
+        print(paste(tick, response, "RF failed"))
     })
-
-    return(list(lm.mod, list(r2.train, r2.pred), list(mse.train, mse.pred),
-                list(rmse.train, rmse.pred), list(mae.train, mae.pred),
-                list(mape.train, mape.pred), coeffs, confints))
+    
+    
+    return(list(knn, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred),
+                list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
 }
 ```
 
-When calling the *doLM* function using the same parameters as with random forest and XGBoost, each iteration of cross-validation produces only a single model variant - the outcome being that only 4 linear models were created in the background per ticker. This, of course, changes nothing in regards to the number of models requiring manual evaluation - 44 multiple linear regression models in total.
+As was done for both RF and XGB model function wrappers, the above *doKNN* function was called via several combinations of ticker, response measure (closing price, differenced closing price, percent return, and differenced volatility), and R-squared vs. RMSE evaluation metrics. These function calls are as depicted below.
 
 ```{r}
 startOverall <- Sys.time() #Start Overall timer
 
-AAPL.lm.Rsquared <- doLM(AAPL[[1]], AAPL[[2]], "AAPL", "Rsquared")
-AMZN.lm.Rsquared <- doLM(AMZN[[1]], AMZN[[2]], "AMZN", "Rsquared")
-BA.lm.Rsquared   <- doLM(BA[[1]], BA[[2]], "BA", "Rsquared")
-DWDP.lm.Rsquared <- doLM(DWDP[[1]], DWDP[[2]], "DWDP", "Rsquared")
-JNJ.lm.Rsquared  <- doLM(JNJ[[1]], JNJ[[2]], "JNJ", "Rsquared")
-JPM.lm.Rsquared  <- doLM(JPM[[1]], JPM[[2]], "JPM", "Rsquared")
-NEE.lm.Rsquared  <- doLM(NEE[[1]], NEE[[2]], "NEE", "Rsquared")
-PG.lm.Rsquared   <- doLM(PG[[1]], PG[[2]], "PG", "Rsquared")
-SPG.lm.Rsquared  <- doLM(SPG[[1]], SPG[[2]], "SPG", "Rsquared")
-VZ.lm.Rsquared   <- doLM(VZ[[1]], VZ[[2]], "VZ", "Rsquared")
-XOM.lm.Rsquared  <- doLM(XOM[[1]], XOM[[2]], "XOM", "Rsquared")
+## Predict 'close'
+setup_close()
 
-AAPL.lm.RMSE <- doLM(AAPL[[1]], AAPL[[2]], "AAPL", "RMSE")
-AMZN.lm.RMSE <- doLM(AMZN[[1]], AMZN[[2]], "AMZN", "RMSE")
-BA.lm.RMSE   <- doLM(BA[[1]], BA[[2]], "BA", "RMSE")
-DWDP.lm.RMSE <- doLM(DWDP[[1]], DWDP[[2]], "DWDP", "RMSE")
-JNJ.lm.RMSE  <- doLM(JNJ[[1]], JNJ[[2]], "JNJ", "RMSE")
-JPM.lm.RMSE  <- doLM(JPM[[1]], JPM[[2]], "JPM", "RMSE")
-NEE.lm.RMSE  <- doLM(NEE[[1]], NEE[[2]], "NEE", "RMSE")
-PG.lm.RMSE   <- doLM(PG[[1]], PG[[2]], "PG", "RMSE")
-SPG.lm.RMSE  <- doLM(SPG[[1]], SPG[[2]], "SPG", "RMSE")
-VZ.lm.RMSE   <- doLM(VZ[[1]], VZ[[2]], "VZ", "RMSE")
-XOM.lm.RMSE  <- doLM(XOM[[1]], XOM[[2]], "XOM", "RMSE")
+AAPL.close.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "Rsquared")
+XOM.close.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "close", close ~ ., "Rsquared")
+AAPL.close.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "RMSE")
+XOM.close.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "close", close ~ ., "RMSE")
 
-AAPLdiff.lm.Rsquared <- doLM(AAPL[[3]], AAPL[[4]], "AAPL", "Rsquared", "diff", AAPL[[1]], AAPL[[2]])
-AMZNdiff.lm.Rsquared <- doLM(AMZN[[3]], AMZN[[4]], "AMZN", "Rsquared", "diff", AMZN[[1]], AMZN[[2]])
-BAdiff.lm.Rsquared   <- doLM(BA[[3]], BA[[4]], "BA", "Rsquared", "diff", BA[[1]], BA[[2]])
-DWDPdiff.lm.Rsquared <- doLM(DWDP[[3]], DWDP[[4]], "DWDP", "Rsquared", "diff", DWDP[[1]], DWDP[[2]])
-JNJdiff.lm.Rsquared  <- doLM(JNJ[[3]], JNJ[[4]], "JNJ", "Rsquared", "diff", JNJ[[1]], JNJ[[2]])
-JPMdiff.lm.Rsquared  <- doLM(JPM[[3]], JPM[[4]], "JPM", "Rsquared", "diff", JPM[[1]], JPM[[2]])
-NEEdiff.lm.Rsquared  <- doLM(NEE[[3]], NEE[[4]], "NEE", "Rsquared", "diff", NEE[[1]], NEE[[2]])
-PGdiff.lm.Rsquared   <- doLM(PG[[3]], PG[[4]], "PG", "Rsquared", "diff", PG[[1]], PG[[2]])
-SPGdiff.lm.Rsquared  <- doLM(SPG[[3]], SPG[[4]], "SPG", "Rsquared", "diff", SPG[[1]], SPG[[2]])
-VZdiff.lm.Rsquared   <- doLM(VZ[[3]], VZ[[4]], "VZ", "Rsquared", "diff", VZ[[1]], VZ[[2]])
-XOMdiff.lm.Rsquared  <- doLM(XOM[[3]], XOM[[4]], "XOM", "Rsquared", "diff", XOM[[1]], XOM[[2]])
+## Predict 'close.diff'
+setup_close.diff()
 
-AAPLdiff.lm.RMSE <- doLM(AAPL[[3]], AAPL[[4]], "AAPL", "RMSE", "diff", AAPL[[1]], AAPL[[2]])
-AMZNdiff.lm.RMSE <- doLM(AMZN[[3]], AMZN[[4]], "AMZN", "RMSE", "diff", AMZN[[1]], AMZN[[2]])
-BAdiff.lm.RMSE   <- doLM(BA[[3]], BA[[4]], "BA", "RMSE", "diff", BA[[1]], BA[[2]])
-DWDPdiff.lm.RMSE <- doLM(DWDP[[3]], DWDP[[4]], "DWDP", "RMSE", "diff", DWDP[[1]], DWDP[[2]])
-JNJdiff.lm.RMSE  <- doLM(JNJ[[3]], JNJ[[4]], "JNJ", "RMSE", "diff", JNJ[[1]], JNJ[[2]])
-JPMdiff.lm.RMSE  <- doLM(JPM[[3]], JPM[[4]], "JPM", "RMSE", "diff", JPM[[1]], JPM[[2]])
-NEEdiff.lm.RMSE  <- doLM(NEE[[3]], NEE[[4]], "NEE", "RMSE", "diff", NEE[[1]], NEE[[2]])
-PGdiff.lm.RMSE   <- doLM(PG[[3]], PG[[4]], "PG", "RMSE", "diff", PG[[1]], PG[[2]])
-SPGdiff.lm.RMSE  <- doLM(SPG[[3]], SPG[[4]], "SPG", "RMSE", "diff", SPG[[1]], SPG[[2]])
-VZdiff.lm.RMSE   <- doLM(VZ[[3]], VZ[[4]], "VZ", "RMSE", "diff", VZ[[1]], VZ[[2]])
-XOMdiff.lm.RMSE  <- doLM(XOM[[3]], XOM[[4]], "XOM", "RMSE", "diff", XOM[[1]], XOM[[2]])
+AAPL.closediff.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ .,
+                                     "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ .,
+                                    "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
+AAPL.closediff.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ .,
+                                 "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ .,
+                                "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
+
+## Predict 'return.percent'
+setup_return.percent()
+
+AAPL.returnpercent.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "Rsquared")
+XOM.returnpercent.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "Rsquared")
+AAPL.returnpercent.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "RMSE")
+XOM.returnpercent.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "RMSE")
+
+## Predict 'volatility.diff'
+setup_volatility.diff()
+
+AAPL.volatilitydiff.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ .,
+                                          "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ .,
+                                         "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+AAPL.volatilitydiff.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ .,
+                                      "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ .,
+                                     "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
 
 print(Sys.time() - startOverall)
 ```
 
-An example of what the plotted outputs look like as generated by *doLM* is as follows (JPM,differenced,RMSE results shown).
+An example plotted output via the *doKNN* function calls is as follows. The example shown below is for the AAPL hourly closing price (To see all outputs, please refer to the *KNNplots_* PDF file outputs included with this project's submission).
 
+![AAPL, Closing Price, Rsquared kNN Model Evaluation Output](KNNplots_AAPLclose_Rsquared.pdf){width=800px height=800px}
 
+Though run time was much faster than my other models (~16 mins), k-Nearest-Neighbor models and other *doKNN* returned outputs were saved to RDS files after generation to avoid needing to re-run the code multiple times.
+
+```{r}
+## Save models and metrics to external RDS
+for(m in ls(pattern = '\\.knn\\.')){
+    saveRDS(get(m), paste0('Data/ModelRDS/', m, '.RDS'))
+}
+```
+
+#### Generalized Additive Model with Regression Splines
+For the final model type, GAM with Splines, the same methodology of timeslice cross-validation was used for training in *doGAM*. Similar to all other model types, hyper-parameter tuning was performed to identify the model configuration which produces the best model. The parameter tuned in this case was *df*, or the number of degrees of freedom to be defined. The same metrics of R-squared, MSE, RMSE, MAE, and MAPE metrics were calculated for both cross-validated training data and prediction data. Finally, visual R-squared evaluation plots and actual vs. predicted stock closing prices, differenced closing prices, percent returns, and differenced volatility were plotted to PDF for both training and prediction datasets (See *KNNplots_* prefixed PDFs), and feature importance rankings were captured for later review.
+
+The reason for also implementing a GAM with Splines model was to try to overcome the poor performance of Project 1's multiple linear regression model. Since the GAM treats response relationships additively, the hope was that it could account for both linearities as well as non-linearities in the stock measure data. Unfortunately, as is described in the paper write-up included with this project's submission, the GAM model proved to be too complex for the small amount of data under analysis. Therefore, prediction performance was quite unsatisfactory.
+
+```{r}
+doGAM <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
+                  orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
+    tryCatch({
+        ## Write outputs to external files for later review
+        par(mfrow=c(1,1))
+        sink(paste0("doGAM_", tick, response, "_", metric, ".txt"))
+        warningOut <- file(paste0("Warnings/doGAM_", tick, response, "_", metric, "_warnings.txt"), open="wt")
+        sink(warningOut, type = "message")
+        pdf(paste0('GAMplots_',tick, response, '_', metric, '.pdf'))
+        
+        ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
+        ## Setup data
+        cols <- colnames(train.df)
+        cols <- cols[!cols %in% "date"]
+        
+        ## Create GAM Seeds
+        # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
+        set.seed(123)
+        seeds <- vector(mode = "list", length = 79) #Length based on number of resamples + 1 for final model iteration
+        for(i in 1:78) seeds[[i]] <- sample.int(1000, 72) #sample.int second argument value based on expand.grid length
+        seeds[[79]] <- sample.int(1000, 1)
+        
+        ## Setup training parameters
+        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7,
+                                   fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds,
+                                   search = "grid") #98 hour initial cv training, 7 hour cv testing
+        tuneGridGAM <- expand.grid(df=c(1:72))
+
+        ## Perform training
+        start <- Sys.time() #Start timer
+        gam <- train(formula, data = train.df[,cols], method = "gamSpline", metric = metric,
+                     trControl = ts.control, tuneGrid = tuneGridGAM, importance=TRUE)
+        print(Sys.time() - start)
+        
+        cat("\ngamSpline Output\n")
+        print(gam)
+        print(plot(gam))
+        
+        ## Evaluate metrics
+        r2.train <- rSquared(train.df[,response], train.df[,response] - predict(gam, train.df[,cols]))
+        r2.pred <- rSquared(pred.df[,response], pred.df[,response] - predict(gam, pred.df[,cols]))
+        mse.train <- mean((train.df[,response] - predict(gam, train.df[,cols]))^2)
+        mse.pred <- mean((pred.df[,response] - predict(gam, pred.df[,cols]))^2)
+        rmse.train <- sqrt(mse.train)
+        rmse.pred <- sqrt(mse.pred)
+        mae.train <- mean(abs(train.df[,response] - predict(gam, train.df[,cols])))
+        mae.pred <- mean(abs(pred.df[,response] - predict(gam, pred.df[,cols])))
+        mape.train <- MAPE(train.df[,response], predict(gam, train.df[,cols]))
+        mape.pred <- MAPE(pred.df[,response], predict(gam, pred.df[,cols]))
+        
+        ## Plot Rsquared Evaluation
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=train.df[,response], pred=predict(gam, train.df[,cols])))
+        print(p + geom_point() +
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "gamSpline Regression: Training r^2 =", r2.train)))
+        
+        p <- ggplot(aes(x=actual, y=pred),
+                    data=data.frame(actual=pred.df[,response], pred=predict(gam, pred.df[,cols])))
+        print(p + geom_point() +
+                  geom_abline(color="red") +
+                  ggtitle(paste(tick, response, "gamSpline Regression: Prediction r^2 =", r2.pred)))
+        
+        if(xform == "diff"){
+            ## Plot trained and predicted performance
+            plot(as.numeric(c(cumsum(c(orig.train.df[,orig.response][1], train.df[,response])),
+                              cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response),
+                 xaxt = "n", main = paste0(tick, " gamSpline Performance (", response, "): Training + Prediction"))
+            axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+            text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2,
+                 labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(orig.train.df[,orig.response][1], predict(gam, train.df[,cols]))),
+                    cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols])))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+            
+            ## Plot just predicted performance
+            plot(as.numeric(cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response),
+                 xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols]))),
+                                            cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))),
+                                      max(c(cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols]))),
+                                            cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))))),
+                 main = paste0(tick, " gamSpline Performance (", response, "): Prediction"))
+            axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+            text(1:(length(pred.df[,response])), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(orig.pred.df[,orig.response][1], predict(gam, pred.df[,cols]))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+        }
+
+        ## Plot trained and predicted performance
+        plot(as.numeric(c(train.df[,response], pred.df[,response])), type = "l", lty = 1,
+             xlab = "Date & Hour", ylab = response, xaxt = "n",
+             main = paste0(tick, " gamSpline Performance (", response, "): Training + Prediction"))
+        axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
+        text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2,
+             labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)),
+             srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+        lines(c(predict(gam, train.df[,cols]),predict(gam, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+        abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
+        
+        ## Plot just predicted performance
+        plot(as.numeric(pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = response,
+             xaxt = "n", ylim = c(min(c(predict(gam, pred.df[,cols]), pred.df[,response])),
+                                  max(c(predict(gam, pred.df[,cols]), pred.df[,response]))),
+             main = paste0(tick, " gamSpline Performance (", response, "): Prediction"))
+        axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
+        text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour),
+             srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+        lines(predict(gam, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
+
+        
+        tryCatch({
+            ## Get feature importance
+            feat.imp <- varImp(gam)
+            plot(feat.imp, main = paste(tick, response, "gamSpline Feature Importance"))
+            
+            on.exit(dev.off())
+            on.exit(sink(type="message"), add = TRUE)
+            on.exit(close(warningOut), add = TRUE)
+            on.exit(sink(), add = TRUE)
+            return(list(gam, list(r2.train, r2.pred), list(mse.train, mse.pred),
+                        list(rmse.train, rmse.pred), list(mae.train, mae.pred),
+                        list(mape.train, mape.pred), feat.imp))
+        }, error = function(e){
+            on.exit(dev.off())
+            on.exit(sink(type="message"), add = TRUE)
+            on.exit(close(warningOut), add = TRUE)
+            on.exit(sink(), add = TRUE)
+            return(list(gam, list(r2.train, r2.pred), list(mse.train, mse.pred),
+                        list(rmse.train, rmse.pred), list(mae.train, mae.pred),
+                        list(mape.train, mape.pred), NA))
+        })
+    }, error = function(e){
+        on.exit(dev.off())
+        on.exit(sink(type="message"), add = TRUE)
+        on.exit(close(warningOut), add = TRUE)
+        on.exit(sink(), add = TRUE)
+        print(paste(tick, response, "gamSpline failed"))
+    })
+}
+```
+
+The above *doGAM* function was called via several combinations of ticker, response measure (closing price, differenced closing price, percent return, and differenced volatility), and R-squared vs. RMSE evaluation metrics, just like for RF, XGB, and kNN models. These function calls are as follows.
+
+```{r}
+startOverall <- Sys.time() #Start Overall timer
+
+## Predict 'close'
+setup_close()
+
+AAPL.close.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "Rsquared")
+XOM.close.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "close", close ~ ., "Rsquared")
+AAPL.close.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "RMSE")
+XOM.close.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "close", close ~ ., "RMSE")
+
+## Predict 'close.diff'
+setup_close.diff()
+
+AAPL.closediff.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ .,
+                                     "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ .,
+                                    "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "close")
+AAPL.closediff.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "close.diff", close.diff ~ .,
+                                 "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "close")
+XOM.closediff.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "close.diff", close.diff ~ .,
+                                "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "close")
+
+## Predict 'return.percent'
+setup_return.percent()
+
+AAPL.returnpercent.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "Rsquared")
+XOM.returnpercent.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "Rsquared")
+AAPL.returnpercent.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "return.percent", return.percent ~ ., "RMSE")
+XOM.returnpercent.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "return.percent", return.percent ~ ., "RMSE")
+
+## Predict 'volatility.diff'
+setup_volatility.diff()
+
+AAPL.volatilitydiff.gam.Rsquared <- doGAM(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ .,
+                                          "Rsquared", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.gam.Rsquared <- doGAM(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ .,
+                                         "Rsquared", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+AAPL.volatilitydiff.gam.RMSE <- doGAM(AAPL.train, AAPL.pred, "AAPL", "volatility.diff", volatility.diff ~ .,
+                                      "RMSE", "diff", AAPL.train.adder, AAPL.pred.adder, "volatility")
+XOM.volatilitydiff.gam.RMSE <- doGAM(XOM.train, XOM.pred, "XOM", "volatility.diff", volatility.diff ~ .,
+                                     "RMSE", "diff", XOM.train.adder, XOM.pred.adder, "volatility")
+
+print(Sys.time() - startOverall)
+```
+
+An example plotted output via the *doGAM* function calls is as follows. The example shown below is for the AAPL hourly closing price (To see all outputs, please refer to the *GAMplots_* PDF file outputs included with this project's submission). As these plot results clearly indicate, this model is not suitable for my sentiment and stock measure data, or at least not in such small quantity. As did the multiple linear regression model of Project 1, the GAM model performance appears to be random with extremely large prediction values and swings when predicting measures using the test dataset.
+
+![AAPL, Closing Price, Rsquared GAM Model Evaluation Output](GAMplots_AAPLclose_Rsquared.pdf){width=800px height=800px}
+
+Again for the Generalized Additive Models, trained models and other *doGAM* returned outputs were saved to RDS files after generation to avoid needing to re-run the code multiple times (~7 hour runtime on my PC).
+
+```{r}
+## Save models and metrics to external RDS
+for(m in ls(pattern = '\\.gam\\.')){
+    saveRDS(get(m), paste0('Data/ModelRDS/', m, '.RDS'))
+}
+```
 
 ### Sentiment Model Comparisons
-Finally, after generating all models (takes about 9 hours of runtime after thorough debug), I proceeded with model comparison. To do this, I staged each ticker's models' metrics against one another for review. This was done a few different ways. First, resamples used during the cross-validation stage of each model's development were gathered and the cross-validation R-squared, RMSE, and MAE values were compared graphically for each model per ticker. Second, all metrics calculated during model development using both training and prediction data were combined into a dataframe for each model per ticker for review and comparison. Third, because reviewing so many performance metric values at once was rather overwhelming, I created a ranked dataframe in which each model per ticker is ranked from 1 to 12 (since there were 12 models produced per ticker) to produce a ranking of the models from best (1) to worst (12) using just training data metrics (*rank.train*), using just prediction metrics (*rank.pred*), and then using all metrics combined (*rank.overall*). Both a combined metrics table and combined ranks table including all tickers were output for final evaluation in Tableau as will be described later.
+###### *(The following model comparison descriptions remain unchanged from Project 1)*
+Finally, after generating all models, I proceeded with model comparison. To do this, I staged each ticker's models' metrics against one another for review. This was done a few different ways. First, resamples used during the cross-validation stage of each model's development were gathered and the cross-validation R-squared, RMSE, and MAE values were compared graphically for each model per ticker. Second, all metrics calculated during model development using both training and prediction data were combined into a dataframe for each model per ticker for review and comparison. Third, because reviewing so many performance metric values at once was rather overwhelming, I created a ranked dataframe in which each model and response per ticker is ranked from 1 to 8 (since there were 8 models produced per ticker/response combination) to produce a ranking of the models from best (1) to worst (8) using just training data metrics (*rank.train*), using just prediction metrics (*rank.pred*), and then using all metrics combined (*rank.overall*). Both a combined metrics table and combined ranks table including all tickers were output for final evaluation in Tableau as will be described later.
 
-All the above functionalities were wrapped into a function, *compareMods*, as shown below. It's also worth mentioning that since many of the models struggled to predict on unforeseen data (my prediction datasets) given the very short training duration of three weeks (again, because of StockTwits, Twitter, and Yahoo Finance data availability), many of the prediction R-squared values were negative. Therefore, I chose to make R-squared prediction values *NA* during the ranking phase. I also chose to treat ties by applying the minimum rank value. So in the case of having one model come in first, another come in second, but then the next two tieing with the same metric values, these third and fourth models would both receive a rank of 3 and then the fifth model would receive a rank of 5. In this example, there would be no model ranked as 4 since two were tied for 3.
+All the above functionalities were wrapped into a function, *compareMods*, as shown below. It's also worth mentioning that since many of the models struggled to predict on unforeseen data (my prediction datasets) given the very short training duration of 5.5 weeks (again, because of StockTwits, Twitter, and Yahoo Finance data availability), many of the prediction R-squared values were negative. Therefore, I chose to make R-squared prediction values *NA* during the ranking phase. I also chose to treat ties by applying the minimum rank value. So in the case of having one model come in first, another come in second, but then the next two tieing with the same metric values, these third and fourth models would both receive a rank of 3 and then the fifth model would receive a rank of 5. In this example, there would be no model ranked as 4 since two were tied for 3.
 
 As before, plots produced by *compareMods* are written to PDF. The PDF file prefix for these is *Comparison_*.
 
 ```{r}
+## Load saved models from RDS files
+mods <- list.files(path = "Data/ModelRDS/")
+for(m in mods){
+    assign(m, readRDS(paste0("Data/ModelRDS/", m)))
+}
+
 ## Compare models for each ticker graphically
-compareMods <- function(pat){
-    pdf(paste0('Comparison_', pat, '.pdf'))
-    
+compareMods <- function(pat, response){
+    pdf(paste0('Comparison_', pat, response, '.pdf'))
+
     ## Get resample results for each model
-    modList <- ls(pattern = paste0(pat,"."), envir=.GlobalEnv)
+    modList <- ls(pattern = paste0("^", pat, "\\.", response, "\\."), envir=.GlobalEnv)
     if(pat == 'PG') modList <- modList[!grepl('^SPG', modList)]
     comp <- lapply(modList, function(x) get(x)[[1]])
     names(comp) <- modList
     comp <- resamples(comp)
-    
+
     ## Compare metrics of resample results
     trellis.par.set(caretTheme())
-    print(dotplot(comp, metric = "Rsquared", main = "Sentiment Model Review - R^2"))
-    print(dotplot(comp, metric = "RMSE", main = "Sentiment Model Review - RMSE"))
-    print(dotplot(comp, metric = "MAE", main = "Sentiment Model Review - MAE"))
-    
+    print(dotplot(comp, metric = "Rsquared", main = paste0("Sentiment Model Review (", pat, " ", response, ") - R^2")))
+    print(dotplot(comp, metric = "RMSE", main = paste0("Sentiment Model Review (", pat, " ", response, ") - RMSE")))
+    print(dotplot(comp, metric = "MAE", main = paste0("Sentiment Model Review (", pat, " ", response, ") - MAE")))
+
     ## Compare and rank overall metrics
     modInfo <- data.frame(model.name = character(), ticker = character(), r2.train = numeric(),
-                          r2.pred = numeric(), mse.train = numeric(), mse.pred = numeric(),
-                          rmse.train = numeric(), rmse.pred = numeric(), mae.train = numeric(),
-                          mae.pred = numeric(), mape.train = numeric(), mape.pred = numeric())
+                          r2.pred = numeric(), mse.train = numeric(), mse.pred = numeric(), rmse.train = numeric(),
+                          rmse.pred = numeric(), mae.train = numeric(), mae.pred = numeric(), mape.train = numeric(),
+                          mape.pred = numeric())
     for(m in modList){
-        modInfo  <-  rbind(modInfo, data.frame(model.name = m,
-                                               ticker = strsplit(m, '\\.|d')[[1]][1],
-                                               r2.train = get(m)[[2]][[1]],
-                                               r2.pred = get(m)[[2]][[2]],
-                                               mse.train = get(m)[[3]][[1]],
-                                               mse.pred = get(m)[[3]][[2]],
-                                               rmse.train = get(m)[[4]][[1]],
-                                               rmse.pred = get(m)[[4]][[2]],
-                                               mae.train = get(m)[[5]][[1]],
-                                               mae.pred = get(m)[[5]][[2]],
-                                               mape.train = get(m)[[6]][[1]],
-                                               mape.pred = get(m)[[6]][[2]]))
+        modInfo  <-  rbind(modInfo, data.frame(model.name = m, ticker = strsplit(m, '\\.|d')[[1]][1],
+                                                 r2.train = get(m)[[2]][[1]], r2.pred = get(m)[[2]][[2]],
+                                                 mse.train = get(m)[[3]][[1]], mse.pred = get(m)[[3]][[2]],
+                                                 rmse.train = get(m)[[4]][[1]], rmse.pred = get(m)[[4]][[2]],
+                                                 mae.train = get(m)[[5]][[1]], mae.pred = get(m)[[5]][[2]],
+                                                 mape.train = get(m)[[6]][[1]], mape.pred = get(m)[[6]][[2]]))
     }
-    
+
     model.name <- modInfo$model.name
     ticker <- modInfo$ticker
     r2.train <- rank(-modInfo$r2.train, ties.method = "min")
@@ -1400,76 +1615,63 @@ compareMods <- function(pat){
     mae.pred <- rank(modInfo$mae.pred, ties.method = "min")
     mape.train <- rank(modInfo$mape.train, ties.method = "min")
     mape.pred <- rank(modInfo$mape.pred, ties.method = "min")
-    
+
     ## Make final rankings
-    modRanks <- data.frame(model.name, ticker, r2.train, r2.pred, mse.train, mse.pred,
-                           rmse.train, rmse.pred, mae.train, mae.pred, mape.train, mape.pred)
-    modRanks$rank.overall <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE),
-                                  ties.method = "min")
-    modRanks$rank.train <- rank(rowSums(modRanks[,c(3,5,7,9,11)], na.rm = TRUE),
-                                ties.method = "min")
-    modRanks$rank.pred <- rank(rowSums(modRanks[,c(4,6,8,10,12)], na.rm = TRUE),
-                               ties.method = "min")
-    
-    
+    modRanks <- data.frame(model.name, ticker, r2.train, r2.pred, mse.train, mse.pred, rmse.train, rmse.pred,
+                           mae.train, mae.pred, mape.train, mape.pred)
+    modRanks$rank.overall <- rank(rowSums(modRanks[,3:length(modRanks)], na.rm = TRUE), ties.method = "min")
+    modRanks$rank.train <- rank(rowSums(modRanks[,c(3,5,7,9,11)], na.rm = TRUE), ties.method = "min")
+    modRanks$rank.pred <- rank(rowSums(modRanks[,c(4,6,8,10,12)], na.rm = TRUE), ties.method = "min")
+
+
     ## Write to global variables
-    assign(paste0('Comparison.', pat), modInfo, envir=.GlobalEnv)
-    assign(paste0('Ranks.', pat), modRanks, envir=.GlobalEnv)
-    
+    assign(paste0('Comparison.', pat, '.', response), modInfo, envir=.GlobalEnv)
+    assign(paste0('Ranks.', pat, '.', response), modRanks, envir=.GlobalEnv)
+
     on.exit(dev.off())
-    
+
     return(comp)
 }
 ```
 
-The above *compareMods* function is called for each individual ticker, thus creating a metrics and rank table for each.
+The above *compareMods* function is called for each individual ticker and response type, thus creating a metrics and rank table for each.
 
 ```{r}
-## Compare models for each ticker
-compareMods('AAPL')
-compareMods('AMZN')
-compareMods('BA')
-compareMods('DWDP')
-compareMods('JNJ')
-compareMods('JPM')
-compareMods('NEE')
-compareMods('PG')
-compareMods('SPG')
-compareMods('VZ')
-compareMods('XOM')
+## Compare models for each ticker/response combination
+compareMods('AAPL', 'close')
+compareMods('AAPL', 'closediff')
+compareMods('AAPL', 'returnpercent')
+compareMods('AAPL', 'volatilitydiff')
+compareMods('XOM', 'close')
+compareMods('XOM', 'closediff')
+compareMods('XOM', 'returnpercent')
+compareMods('XOM', 'volatilitydiff')
 ```
 
-Example metric and rank outputs for one of the tickers is provided below (JPM again for consistency). Note that while the metrics table can be overwhelming, letting R do the ranking for me makes my job of working through model performance comparisons much easier. My final evaluation for the paper and presentation was performed after outputting such data for each ticker to Tableau for easier review.
+Example metric and rank outputs for the AAPL/closing price ticker/response combination are shown below. Note that while the metrics table can be overwhelming, letting R do the ranking for me makes my job of working through model performance comparisons much easier. My final evaluation for the paper and presentation was performed after outputting such data for each ticker to Tableau for easier review.
 
 ```{r}
-Comparison.JPM
-Ranks.JPM
+Comparison.AAPL.close
+Ranks.AAPL.close
 ```
 
-
-
-The above comparison and ranking results, along with feature importance rankings for random forest and XGBoost and coefficients and confidence intervals for multiple linear regression, were finally output to Tableau for final model review. In all cases, all data were combined among all tickers such that only four tables were output to Tableau. A ticker column was added to support filtering each dataset by ticker using Tableau's filters. My code to generate these outputs is as follows.
+The above comparison and ranking results for each ticker/response combination, along with feature importance rankings, were finally output to Tableau for final model review. In all cases, all data were combined among all tickers such that only four tables were output to Tableau. A ticker column was added to support filtering each dataset by ticker using Tableau's filters. My code to generate these outputs is as follows.
 
 ```{r}
 ## Output data for visualization in Tableau
 allTickDF <- rbind(AAPL[[1]], AAPL[[2]]) #First, output non-diffed price and scores
-allTickDF$highDiff <- c(AAPL[[3]][[ncol(AAPL[[3]])]], AAPL[[4]][[ncol(AAPL[[4]])]])
 allTickDF$ticker <- 'AAPL'
-ticks10 <- c('AMZN', 'BA', 'DWDP', 'JNJ', 'JPM', 'NEE', 'PG', 'SPG', 'VZ', 'XOM')
-for(t in ticks10){
-    temp <- rbind(get(t)[[1]], get(t)[[2]])
-    temp$highDiff <- c(get(t)[[3]][[ncol(get(t)[[3]])]], get(t)[[4]][[ncol(get(t)[[4]])]])
-    temp$ticker <- t
-    allTickDF <- rbind(allTickDF, temp)
-}
-rm(t, temp, ticks10)
+temp <- rbind(XOM[[1]], XOM[[2]])
+temp$ticker <- "XOM"
+allTickDF <- rbind(allTickDF, temp)
+rm(temp)
+
 write.csv(allTickDF, 'Data/Tableau/allTickDF.csv', row.names = FALSE)
 
 ## Output feature importance where available
-featureRank <- data.frame(model = character(), ticker = character(), feature = character(),
-                          importance = numeric())
-decTrees <- ls(pattern = '.xgb.|.rf.')
-for (m in decTrees){
+featureRank <- data.frame(model = character(), ticker = character(), feature = character(), importance = numeric())
+hasFeatRank <- ls(pattern = '.xgb.|.rf.|.knn.|.gam.')
+for (m in hasFeatRank){
     if(!is.na(get(m)[length(get(m))])){
         temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
                            feature = row.names(get(m)[[length(get(m))]][[1]]),
@@ -1477,25 +1679,8 @@ for (m in decTrees){
         featureRank <- rbind(featureRank, temp)
     }
 }
-rm(m, temp, decTrees)
+rm(m, temp, hasFeatRank)
 write.csv(featureRank, 'Data/Tableau/featureRank.csv', row.names = FALSE)
-
-## Output coefficients and confidence intervals where available
-coeffConfs <- data.frame(model = character(), ticker = character(), variable = character(),
-                          coeff = numeric(), confInt.Lower = numeric(), confInt.Upper = numeric())
-linMods <- ls(pattern = '.lm.')
-for (m in linMods){
-    if(!is.na(get(m)[length(get(m))])){
-        temp <- data.frame(model = m, ticker = strsplit(m, '\\.')[[1]][1],
-                           variable = names(get(m)[[length(get(m))-1]]),
-                           coeff = get(m)[[length(get(m))-1]],
-                           confInt.Lower = get(m)[[length(get(m))]][,1],
-                           confInt.Upper = get(m)[[length(get(m))]][,2])
-        coeffConfs <- rbind(coeffConfs, temp)
-    }
-}
-rm(m, temp, linMods)
-write.csv(coeffConfs, 'Data/Tableau/coeffConfs.csv', row.names = FALSE)
 
 ## Output metric and ranking tables
 comps <- ls(pattern = '^Comparison\\.')
@@ -1512,5 +1697,7 @@ for(r in rankings[-1]){
     modelRanks <- rbind(modelRanks, get(r))
 }
 rm(rankings, r)
+#Following application of sapply inspired by https://stackoverflow.com/questions/2803460/how-to-get-the-second-sub-element-of-every-element-in-a-list?utm_medium=organic&utm_source=google_rich_qa&utm_campaign=google_rich_qa
+modelRanks$response <- sapply(strsplit(as.character(modelRanks$model.name), "\\."), "[[", 2)
 write.csv(modelRanks, 'Data/Tableau/modelRanks.csv', row.names = FALSE)
 ```

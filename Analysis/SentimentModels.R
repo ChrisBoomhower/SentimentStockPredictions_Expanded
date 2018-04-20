@@ -542,21 +542,32 @@ for(m in ls(pattern = '\\.xgb\\.')){
 ####################################################
 ######### Generate KNN Regression Model ############
 ####################################################
-doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = "", orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
+doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = "",
+                  orig.train.df = train.df, orig.pred.df = pred.df, orig.response = response){
     tryCatch({
         ## Write outputs to external files for later review
         par(mfrow=c(1,1))
-        sink(paste0("doKNN_", tick, response, "_", metric, ".txt"))
+        sink(paste0("delete/doKNN_", tick, response, "_", metric, ".txt"))
         warningOut <- file(paste0("Warnings/doKNN_", tick, response, "_", metric, "_warnings.txt"), open="wt")
         sink(warningOut, type = "message")
-        pdf(paste0('KNNplots_',tick, response, '_', metric, '.pdf'))
+        pdf(paste0('delete/KNNplots_',tick, response, '_', metric, '.pdf'))
         
         ## Flow and plots inspired by and modified from http://blog.yhat.com/posts/comparing-random-forests-in-python-and-r.html
         ## Setup data
         cols <- colnames(train.df)
         cols <- cols[!cols %in% "date"]
         
-        ## Create Random Forest Seeds
+        ## Preprocess data used during evaluation
+        pp.train.df <- preProcess(train.df, method = c("center", "scale"))
+        pp.train.df <- predict(pp.train.df, train.df)
+        pp.pred.df <- preProcess(pred.df, method = c("center", "scale"))
+        pp.pred.df <- predict(pp.pred.df, pred.df)
+        pp.orig.train.df <- preProcess(orig.train.df, method = c("center", "scale"))
+        pp.orig.train.df <- predict(pp.orig.train.df, orig.train.df)
+        pp.orig.pred.df <- preProcess(orig.pred.df, method = c("center", "scale"))
+        pp.orig.pred.df <- predict(pp.orig.pred.df, orig.pred.df)
+        
+        ## Create kNN Seeds
         # Seeding and timeslice methodology inspired by https://rpubs.com/crossxwill/time-series-cv
         set.seed(123)
         seeds <- vector(mode = "list", length = 79) #Length based on number of resamples + 1 for final model iteration
@@ -564,73 +575,102 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
         seeds[[79]] <- sample.int(1000, 1)
         
         ## Setup training parameters
-        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7, fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds, search = "grid") #70 hour initial cv training, 35 hour cv testing
+        ts.control <- trainControl(method="timeslice", initialWindow = 98, horizon = 7,
+                                   fixedWindow = FALSE, allowParallel = TRUE, seeds = seeds,
+                                   search = "grid") #98 hour initial cv training, 7 hour cv testing
         tuneGridKNN <- expand.grid(k=c(1:72))
-        #metric <- "Rsquared"
         
         ## Perform training
         start <- Sys.time() #Start timer
-        knn <- train(formula, data = train.df[,cols], method = "knn", metric = metric, trControl = ts.control, tuneGrid = tuneGridKNN, importance=TRUE)#, preProcess = "scale")
+        knn <- train(formula, data = train.df[,cols], method = "knn", metric = metric,
+                     trControl = ts.control, tuneGrid = tuneGridKNN, importance=TRUE, preProcess = c("center", "scale"))
         print(Sys.time() - start)
-        #tuneGridRF <- expand.grid(.mtry=22)
-        #rf <- train(high ~ ., data = train.df[,cols], method = "rf", metric = metric, trControl = ts.control, tuneGrid = tuneGridRF, importance=TRUE) #AAPL best mtry = 22
+        
         cat("\nKNN Output\n")
         print(knn)
         print(plot(knn))
         
         ## Evaluate metrics
-        r2.train <- rSquared(train.df[,response], train.df[,response] - predict(knn, train.df[,cols]))
-        r2.pred <- rSquared(pred.df[,response], pred.df[,response] - predict(knn, pred.df[,cols]))
-        mse.train <- mean((train.df[,response] - predict(knn, train.df[,cols]))^2)
-        mse.pred <- mean((pred.df[,response] - predict(knn, pred.df[,cols]))^2)
+        r2.train <- rSquared(pp.train.df[,response], pp.train.df[,response] - scale(predict(knn, train.df[,cols])))
+        r2.pred <- rSquared(pp.pred.df[,response], pp.pred.df[,response] - scale(predict(knn, pred.df[,cols])))
+        mse.train <- mean((pp.train.df[,response] - scale(predict(knn, train.df[,cols])))^2)
+        mse.pred <- mean((pp.pred.df[,response] - scale(predict(knn, pred.df[,cols])))^2)
         rmse.train <- sqrt(mse.train)
         rmse.pred <- sqrt(mse.pred)
-        mae.train <- mean(abs(train.df[,response] - predict(knn, train.df[,cols])))
-        mae.pred <- mean(abs(pred.df[,response] - predict(knn, pred.df[,cols])))
-        mape.train <- MAPE(train.df[,response], predict(knn, train.df[,cols]))
-        mape.pred <- MAPE(pred.df[,response], predict(knn, pred.df[,cols]))
+        mae.train <- mean(abs(pp.train.df[,response] - scale(predict(knn, train.df[,cols]))))
+        mae.pred <- mean(abs(pp.pred.df[,response] - scale(predict(knn, pred.df[,cols]))))
+        mape.train <- MAPE(pp.train.df[,response], scale(predict(knn, train.df[,cols])))
+        mape.pred <- MAPE(pp.pred.df[,response], scale(predict(knn, pred.df[,cols])))
         
         ## Plot Rsquared Evaluation
         p <- ggplot(aes(x=actual, y=pred),
-                    data=data.frame(actual=train.df[,response], pred=predict(knn, train.df[,cols])))
+                    data=data.frame(actual=pp.train.df[,response], pred=scale(predict(knn, train.df[,cols]))))
         print(p + geom_point() +
                   geom_abline(color="red") +
                   ggtitle(paste(tick, response, "KNN Regression: Training r^2 =", r2.train)))
         
         p <- ggplot(aes(x=actual, y=pred),
-                    data=data.frame(actual=pred.df[,response], pred=predict(knn, pred.df[,cols])))
+                    data=data.frame(actual=pp.pred.df[,response], pred=scale(predict(knn, pred.df[,cols]))))
         print(p + geom_point() +
                   geom_abline(color="red") +
                   ggtitle(paste(tick, response, "KNN Regression: Prediction r^2 =", r2.pred)))
         
         if(xform == "diff"){
             ## Plot trained and predicted performance
-            plot(as.numeric(c(cumsum(c(orig.train.df[,orig.response][1], train.df[,response])), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", main = paste0(tick, " KNN Performance (", response, "): Training + Prediction"))
-            axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
-            text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-            lines(c(cumsum(c(orig.train.df[,orig.response][1], predict(knn, train.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols])))), type = "l", lty = 2, lwd = 2, col = "red")
-            abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
-
+            plot(as.numeric(c(cumsum(c(pp.orig.train.df[,orig.response][1], pp.train.df[,response])),
+                              cumsum(c(pp.orig.pred.df[,orig.response][1], pp.pred.df[,response])))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response),
+                 xaxt = "n", main = paste0(tick, " KNN Performance (", response, " scaled): Training + Prediction"))
+            axis(1, at=1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))), labels=FALSE)
+            text(1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))),
+                 par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)),
+                 srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+            lines(c(cumsum(c(pp.orig.train.df[,orig.response][1], scale(predict(knn, train.df[,cols])))),
+                    cumsum(c(pp.orig.pred.df[,orig.response][1], scale(predict(knn, pred.df[,cols]))))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
+            abline(v = length(train.df[,response])+2, lty = 2, col = "blue")
+            
             ## Plot just predicted performance
-            plot(as.numeric(cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))), type = "l", lty = 1, xlab = "Date & Hour", ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response), xaxt = "n", ylim = c(min(c(cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response])))), max(c(cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols]))), cumsum(c(orig.pred.df[,orig.response][1], pred.df[,response]))))), main = paste0(tick, " KNN Performance (", response, "): Prediction"))
-            axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
-            text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-            lines(cumsum(c(orig.pred.df[,orig.response][1], predict(knn, pred.df[,cols]))), type = "l", lty = 2, lwd = 2, col = "red")
+            plot(as.numeric(cumsum(c(pp.orig.pred.df[,orig.response][1], pp.pred.df[,response]))),
+                 type = "l", lty = 1, xlab = "Date & Hour",
+                 ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response),
+                 xaxt = "n", ylim = c(min(c(cumsum(c(pp.orig.pred.df[,orig.response][1], scale(predict(knn, pred.df[,cols])))),
+                                            cumsum(c(pp.orig.pred.df[,orig.response][1],
+                                                     pp.pred.df[,response])))),
+                                      max(c(cumsum(c(pp.orig.pred.df[,orig.response][1],
+                                                     scale(predict(knn, pred.df[,cols])))),
+                                            cumsum(c(pp.orig.pred.df[,orig.response][1],
+                                                     pp.pred.df[,response]))))),
+                 main = paste0(tick, " KNN Performance (", response, " scaled): Prediction"))
+            axis(1, at=1:(length(pp.pred.df[,response])), labels=FALSE)
+            text(1:(length(pp.pred.df[,response])), par("usr")[3] - 0.2,
+                 labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+            lines(cumsum(c(pp.orig.pred.df[,orig.response][1], scale(predict(knn, pred.df[,cols])))),
+                  type = "l", lty = 2, lwd = 2, col = "red")
         }
-        #else{
+        
         ## Plot trained and predicted performance
-        plot(as.numeric(c(train.df[,response], pred.df[,response])), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", main = paste0(tick, " KNN Performance (", response, "): Training + Prediction"))
-        axis(1, at=1:(sum(length(train.df[,response]), length(pred.df[,response]))), labels=FALSE)
-        text(1:(sum(length(train.df[,response]), length(pred.df[,response]))), par("usr")[3] - 0.2, labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)), srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
-        lines(c(predict(knn, train.df[,cols]),predict(knn, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
+        plot(as.numeric(c(pp.train.df[,response], pp.pred.df[,response])), type = "l", lty = 1,
+             xlab = "Date & Hour", ylab = response, xaxt = "n",
+             main = paste0(tick, " KNN Performance (", response, " scaled): Training + Prediction"))
+        axis(1, at=1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))), labels=FALSE)
+        text(1:(sum(length(pp.train.df[,response]), length(pp.pred.df[,response]))), par("usr")[3] - 0.2,
+             labels = c(paste(train.df$date, train.df$hour), paste(pred.df$date, pred.df$hour)),
+             srt = 90, pos = 2, xpd = TRUE, cex = 0.5, offset = -0.1)
+        lines(c(scale(predict(knn, train.df[,cols])),scale(predict(knn, pred.df[,cols]))), type = "l",
+              lty = 2, lwd = 2, col = "red")
         abline(v = length(train.df[,response])+1, lty = 2, col = "blue")
         
         ## Plot just predicted performance
-        plot(as.numeric(pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = response, xaxt = "n", ylim = c(min(c(predict(knn, pred.df[,cols]), pred.df[,response])), max(c(predict(knn, pred.df[,cols]), pred.df[,response]))), main = paste0(tick, " KNN Performance (", response, "): Prediction"))
-        axis(1, at=1:(length(pred.df[,response])), labels=FALSE)
-        text(1:(length(pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour), srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
-        lines(predict(knn, pred.df[,cols]), type = "l", lty = 2, lwd = 2, col = "red")
-        #}
+        plot(as.numeric(pp.pred.df[,response]), type = "l", lty = 1, xlab = "Date & Hour", ylab = response,
+             xaxt = "n", ylim = c(min(c(scale(predict(knn, pred.df[,cols])), pp.pred.df[,response])),
+                                  max(c(scale(predict(knn, pred.df[,cols])), pp.pred.df[,response]))),
+             main = paste0(tick, " KNN Performance (", response, " scaled): Prediction"))
+        axis(1, at=1:(length(pp.pred.df[,response])), labels=FALSE)
+        text(1:(length(pp.pred.df[,response])), par("usr")[3] - 0.2, labels = paste(pred.df$date, pred.df$hour),
+             srt = 90, pos = 2, xpd = TRUE, cex = 0.6, offset = -0.1)
+        lines(scale(predict(knn, pred.df[,cols])), type = "l", lty = 2, lwd = 2, col = "red")
         
         ## Get feature importance
         feat.imp <- varImp(knn)
@@ -649,7 +689,8 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
     })
     
     
-    return(list(knn, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred), list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
+    return(list(knn, list(r2.train, r2.pred), list(mse.train, mse.pred), list(rmse.train, rmse.pred),
+                list(mae.train, mae.pred), list(mape.train, mape.pred), feat.imp))
 }
 
 startOverall <- Sys.time() #Start Overall timer
@@ -661,6 +702,14 @@ AAPL.close.knn.Rsquared <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close", close ~
 XOM.close.knn.Rsquared <- doKNN(XOM.train, XOM.pred, "XOM", "close", close ~ ., "Rsquared")
 AAPL.close.knn.RMSE <- doKNN(AAPL.train, AAPL.pred, "AAPL", "close", close ~ ., "RMSE")
 XOM.close.knn.RMSE <- doKNN(XOM.train, XOM.pred, "XOM", "close", close ~ ., "RMSE")
+
+#Debug only
+# train.df <- AAPL.train
+# pred.df <- AAPL.pred
+# tick <- "AAPL"
+# response = "close"
+# formula = close ~ .
+# metric = "Rsquared"
 
 ## Predict 'close.diff'
 setup_close.diff()
@@ -945,7 +994,7 @@ compareMods <- function(pat, response){
     return(comp)
 }
 
-## Compare models for each ticker
+## Compare models for each ticker/response combination
 compareMods('AAPL', 'close')
 compareMods('AAPL', 'closediff')
 compareMods('AAPL', 'returnpercent')
