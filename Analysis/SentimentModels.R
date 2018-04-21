@@ -934,7 +934,7 @@ for(m in ls(pattern = '\\.gam\\.')){
 ## Load saved models from RDS files
 mods <- list.files(path = "Data/ModelRDS/")
 for(m in mods){
-    assign(m, readRDS(paste0("Data/ModelRDS/", m)))
+    assign(gsub("\\.RDS$", "", m), readRDS(paste0("Data/ModelRDS/", m)))
 }
 
 ## Compare models for each ticker graphically

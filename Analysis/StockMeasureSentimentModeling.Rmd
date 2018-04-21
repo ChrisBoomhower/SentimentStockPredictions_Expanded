@@ -8,7 +8,7 @@ output:
 knitr::opts_chunk$set(warning=FALSE, message=FALSE)
 ```
 
-## Sentiment-Based Stock Modeling - By Chris Boomhower 
+## By Chris Boomhower 
 As an extension of the modeling performed during Project 1, this notebook breaks down my sentiment-based approach to modeling and predicting not only hourly stock price, but also hourly returns and volatility. As before, this approach involved querying social media and news outlet data to obtain publicly shared messages for each stock ticker, consolidating and generating sentiment scores for each of these messages, and then using the newly generated sentiment scores to model stock performance by the hour. Unlike before, however, only two stocks were modeled (AAPL and XOM) instead of an entire portfolio of eleven stocks. This project's approach is still comprised of three primary components (and three subcomponents), but improvements to my previous sentiment scoring methodology and additional model type implementations were utilized, as will be described herein:
 
 1. Social media and news article querying
@@ -1222,7 +1222,8 @@ doKNN <- function(train.df, pred.df, tick, response, formula, metric, xform = ""
             plot(as.numeric(cumsum(c(pp.orig.pred.df[,orig.response][1], pp.pred.df[,response]))),
                  type = "l", lty = 1, xlab = "Date & Hour",
                  ylab = paste0("Cumulative Sum of ", orig.response, "[1] and DIff = ", orig.response),
-                 xaxt = "n", ylim = c(min(c(cumsum(c(pp.orig.pred.df[,orig.response][1], scale(predict(knn, pred.df[,cols])))),
+                 xaxt = "n", ylim = c(min(c(cumsum(c(pp.orig.pred.df[,orig.response][1],
+                                                     scale(predict(knn, pred.df[,cols])))),
                                             cumsum(c(pp.orig.pred.df[,orig.response][1],
                                                      pp.pred.df[,response])))),
                                       max(c(cumsum(c(pp.orig.pred.df[,orig.response][1],
@@ -1569,7 +1570,7 @@ As before, plots produced by *compareMods* are written to PDF. The PDF file pref
 ## Load saved models from RDS files
 mods <- list.files(path = "Data/ModelRDS/")
 for(m in mods){
-    assign(m, readRDS(paste0("Data/ModelRDS/", m)))
+    assign(gsub("\\.RDS$", "", m), readRDS(paste0("Data/ModelRDS/", m)))
 }
 
 ## Compare models for each ticker graphically
@@ -1648,12 +1649,14 @@ compareMods('XOM', 'returnpercent')
 compareMods('XOM', 'volatilitydiff')
 ```
 
-Example metric and rank outputs for the AAPL/closing price ticker/response combination are shown below. Note that while the metrics table can be overwhelming, letting R do the ranking for me makes my job of working through model performance comparisons much easier. My final evaluation for the paper and presentation was performed after outputting such data for each ticker to Tableau for easier review.
+Example metric and rank outputs for the AAPL/closing price ticker/response combination are shown below. Note that while the metrics table can be overwhelming, letting R do the ranking for me makes my job of working through model performance comparisons much easier. My final evaluation for the paper and presentation was performed after outputting such data for each ticker to Tableau for easier review. Note that prediction R-squared results are negative in many cases, normally suggesting very poor model performance. Due to these values being negative, I chose to ignore prediction R-squared values in my model rankings and to rely on all other metrics instead.
 
 ```{r}
 Comparison.AAPL.close
 Ranks.AAPL.close
 ```
+
+![AAPL, Closing Price, Model Comparisons on Resampled Results](Comparison_AAPLclose.pdf){width=800px height=800px}
 
 The above comparison and ranking results for each ticker/response combination, along with feature importance rankings, were finally output to Tableau for final model review. In all cases, all data were combined among all tickers such that only four tables were output to Tableau. A ticker column was added to support filtering each dataset by ticker using Tableau's filters. My code to generate these outputs is as follows.
 
